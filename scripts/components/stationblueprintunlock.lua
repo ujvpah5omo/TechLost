@@ -1,25 +1,22 @@
-local GlobalBlueprintUnlock = Class(function(self, inst)
+local StationBlueprintUnlock = Class(function(self, inst)
     self.inst = inst
     self.unlocked_recipes = {}
-    self.onunlockfn = nil
 end)
 
-function GlobalBlueprintUnlock:IsUnlocked(recipe_name)
+function StationBlueprintUnlock:IsUnlocked(recipe_name)
     return self.unlocked_recipes[recipe_name] == true
 end
 
-function GlobalBlueprintUnlock:UnlockRecipe(recipe_name)
+function StationBlueprintUnlock:UnlockRecipe(recipe_name)
     if recipe_name == nil or self.unlocked_recipes[recipe_name] then
-        return
+        return false
     end
 
     self.unlocked_recipes[recipe_name] = true
-    if self.onunlockfn ~= nil then
-        self.onunlockfn(recipe_name)
-    end
+    return true
 end
 
-function GlobalBlueprintUnlock:GetUnlockedRecipes()
+function StationBlueprintUnlock:GetUnlockedRecipes()
     local recipes = {}
     for recipe_name in pairs(self.unlocked_recipes) do
         recipes[#recipes + 1] = recipe_name
@@ -28,11 +25,11 @@ function GlobalBlueprintUnlock:GetUnlockedRecipes()
     return recipes
 end
 
-function GlobalBlueprintUnlock:OnSave()
+function StationBlueprintUnlock:OnSave()
     return { unlocked_recipes = self:GetUnlockedRecipes() }
 end
 
-function GlobalBlueprintUnlock:OnLoad(data)
+function StationBlueprintUnlock:OnLoad(data)
     if data == nil or data.unlocked_recipes == nil then
         return
     end
@@ -40,14 +37,6 @@ function GlobalBlueprintUnlock:OnLoad(data)
     for _, recipe_name in ipairs(data.unlocked_recipes) do
         self.unlocked_recipes[recipe_name] = true
     end
-
-    self.inst:DoTaskInTime(0, function()
-        if self.onunlockfn ~= nil then
-            for _, recipe_name in ipairs(self:GetUnlockedRecipes()) do
-                self.onunlockfn(recipe_name)
-            end
-        end
-    end)
 end
 
-return GlobalBlueprintUnlock
+return StationBlueprintUnlock

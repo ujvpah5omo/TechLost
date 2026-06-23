@@ -1,5 +1,4 @@
 local GLOBAL = GLOBAL
-local RPC_NAMESPACE = modname
 
 local BLUEPRINT_ONLY_TECH = (GLOBAL.TECH and GLOBAL.TECH.LOST) or { LOST = 1 }
 
@@ -48,12 +47,6 @@ local function RestoreRecipe(recipe)
     end
 end
 
-local function IsGloballyUnlocked(recipe_name)
-    local world = GLOBAL.TheWorld
-    local component = world ~= nil and world.components.globalblueprintunlock or nil
-    return component ~= nil and component:IsUnlocked(recipe_name)
-end
-
 local function BuilderKnowsRecipe(builder, recipe_name)
     if builder == nil or builder.recipes == nil then
         return false
@@ -66,6 +59,14 @@ local function BuilderKnowsRecipe(builder, recipe_name)
     end
 
     return false
+end
+
+local function GetReplicaBuilder(builder)
+    return builder ~= nil
+        and builder.inst ~= nil
+        and builder.inst.replica ~= nil
+        and builder.inst.replica.builder
+        or nil
 end
 
 local function CanPrototypeWithTrees(recipe_level, tech_trees)
@@ -101,19 +102,23 @@ local function IsAtOriginalTechStation(builder, recipe)
     )
 end
 
-local function ShouldRestoreAfterStationCraft(builder, recipe)
+local function ShouldUnlockStationRecipe(builder, recipe)
     return recipe ~= nil
         and recipe._blueprint_only_locked
         and BuilderKnowsRecipe(builder, recipe.name)
         and IsAtOriginalTechStation(builder, recipe)
 end
 
-local function MarkRecipeGloballyRestored(recipe_name)
-    local world = GLOBAL.TheWorld
-    local component = world ~= nil and world.components.globalblueprintunlock or nil
-    if component ~= nil then
-        component:UnlockRecipe(recipe_name)
+local function GetStationUnlockComponent(station, create)
+    if station == nil or station.components == nil then
+        return nil
     end
+
+    if station.components.stationblueprintunlock == nil and create then
+        station:AddComponent("stationblueprintunlock")
+    end
+
+    return station.components.stationblueprintunlock
 end
 
 local function MakeRecipeBlueprintOnly(recipe)
@@ -125,8 +130,7 @@ local function MakeRecipeBlueprintOnly(recipe)
         and recipe._blueprint_only_original_level
         or recipe.level
 
-    if IsGloballyUnlocked(recipe.name)
-        or not IsBlueprintCompatible(recipe)
+    if not IsBlueprintCompatible(recipe)
         or not RequiresTechnology(original_level) then
         RestoreRecipe(recipe)
         return
@@ -142,64 +146,127 @@ local function MakeRecipeBlueprintOnly(recipe)
     recipe._blueprint_only_locked = true
 end
 
-local function RestoreRecipeByName(recipe_name)
-    local recipe = GLOBAL.AllRecipes[recipe_name]
-    if recipe ~= nil then
-        RestoreRecipe(recipe)
-    end
-end
-
-AddClientModRPCHandler(RPC_NAMESPACE, "restore_recipes", function(recipe_names)
-    for recipe_name in string.gmatch(recipe_names, "[^\t]+") do
-        RestoreRecipeByName(recipe_name)
-    end
-end)
-
-local function SendRestoredRecipesToClient(userid, recipe_names)
-    if userid == nil or #recipe_names == 0 then
+local function ClearStationUnlockedRecipes(builder)
+    if builder._blueprint_only_station_recipes == nil then
         return
     end
 
-    local rpc = CLIENT_MOD_RPC[RPC_NAMESPACE]["restore_recipes"]
-    local batch = {}
-    for _, recipe_name in ipairs(recipe_names) do
-        batch[#batch + 1] = recipe_name
-        if #batch >= 20 then
-            SendModRPCToClient(rpc, userid, table.concat(batch, "\t"))
-            batch = {}
+    for recipe_name in pairs(builder._blueprint_only_station_recipes) do
+        if builder.station_recipes ~= nil then
+            builder.station_recipes[recipe_name] = nil
+        end
+        if not BuilderKnowsRecipe(builder, recipe_name) then
+            local replica_builder = GetReplicaBuilder(builder)
+            if replica_builder ~= nil then
+                replica_builder:RemoveRecipe(recipe_name)
+            end
         end
     end
 
-    if #batch > 0 then
-        SendModRPCToClient(rpc, userid, table.concat(batch, "\t"))
-    end
+    builder._blueprint_only_station_recipes = nil
 end
 
-local function BroadcastRestoredRecipe(recipe_name)
-    RestoreRecipeByName(recipe_name)
-    for _, player in ipairs(GLOBAL.AllPlayers) do
-        SendRestoredRecipesToClient(player.userid, { recipe_name })
-    end
-end
+local function ApplyStationUnlockedRecipes(builder)
+    ClearStationUnlockedRecipes(builder)
 
-AddPrefabPostInit("world", function(inst)
-    if not inst.ismastersim then
+    local station = builder ~= nil and builder.current_prototyper or nil
+    local prototyper = station ~= nil and station.components.prototyper or nil
+    local component = GetStationUnlockComponent(station, false)
+    if component == nil or prototyper == nil then
         return
     end
 
-    inst:AddComponent("globalblueprintunlock")
-    inst.components.globalblueprintunlock.onunlockfn = BroadcastRestoredRecipe
+    local added = false
+    for _, recipe_name in ipairs(component:GetUnlockedRecipes()) do
+        local recipe = GLOBAL.AllRecipes[recipe_name]
+        if recipe ~= nil
+            and recipe._blueprint_only_locked
+            and not BuilderKnowsRecipe(builder, recipe_name)
+            and CanPrototypeWithTrees(recipe._blueprint_only_original_level, prototyper.trees) then
+            builder.station_recipes[recipe_name] = true
+            builder._blueprint_only_station_recipes = builder._blueprint_only_station_recipes or {}
+            builder._blueprint_only_station_recipes[recipe_name] = true
+            local replica_builder = GetReplicaBuilder(builder)
+            if replica_builder ~= nil then
+                replica_builder:AddRecipe(recipe_name)
+            end
+            added = true
+        end
+    end
+
+    if added then
+        builder.inst:PushEvent("techtreechange", { level = builder.accessible_tech_trees })
+    end
+end
+
+local function RefreshPlayersUsingStation(station)
+    for _, player in ipairs(GLOBAL.AllPlayers) do
+        local builder = player.components.builder
+        if builder ~= nil and builder.current_prototyper == station then
+            ApplyStationUnlockedRecipes(builder)
+        end
+    end
+end
+
+local function MarkRecipeUnlockedForStation(station, recipe_name)
+    local component = GetStationUnlockComponent(station, true)
+    if component ~= nil and component:UnlockRecipe(recipe_name) then
+        RefreshPlayersUsingStation(station)
+    end
+end
+
+local function SeedStationFromBuilder(builder, station)
+    local prototyper = station ~= nil and station.components.prototyper or nil
+    local component = GetStationUnlockComponent(station, prototyper ~= nil)
+    if builder == nil
+        or builder.recipes == nil
+        or prototyper == nil
+        or component == nil then
+        return
+    end
+
+    local unlocked = false
+    for _, recipe_name in ipairs(builder.recipes) do
+        local recipe = GLOBAL.AllRecipes[recipe_name]
+        if recipe ~= nil
+            and recipe._blueprint_only_locked
+            and CanPrototypeWithTrees(recipe._blueprint_only_original_level, prototyper.trees)
+            and component:UnlockRecipe(recipe_name) then
+            unlocked = true
+        end
+    end
+
+    if unlocked then
+        RefreshPlayersUsingStation(station)
+    end
+end
+
+AddComponentPostInit("prototyper", function(self)
+    if GLOBAL.TheWorld ~= nil
+        and GLOBAL.TheWorld.ismastersim
+        and self.inst.components.stationblueprintunlock == nil then
+        self.inst:AddComponent("stationblueprintunlock")
+    end
 end)
 
 AddComponentPostInit("builder", function(self)
+    local old_evaluate_tech_trees = self.EvaluateTechTrees
+    self.EvaluateTechTrees = function(self, ...)
+        ClearStationUnlockedRecipes(self)
+        local result = old_evaluate_tech_trees(self, ...)
+        ApplyStationUnlockedRecipes(self)
+        return result
+    end
+
     local old_do_build = self.DoBuild
     self.DoBuild = function(self, recname, ...)
         local recipe = recname ~= nil and GLOBAL.AllRecipes[recname] or nil
-        local should_restore = ShouldRestoreAfterStationCraft(self, recipe)
+        local station = self.current_prototyper
+        local should_unlock_station = ShouldUnlockStationRecipe(self, recipe)
         local result, reason = old_do_build(self, recname, ...)
 
-        if result and should_restore then
-            MarkRecipeGloballyRestored(recname)
+        if result and should_unlock_station then
+            MarkRecipeUnlockedForStation(station, recname)
         end
 
         return result, reason
@@ -208,28 +275,24 @@ AddComponentPostInit("builder", function(self)
     local old_buffer_build = self.BufferBuild
     self.BufferBuild = function(self, recname, ...)
         local recipe = recname ~= nil and GLOBAL.AllRecipes[recname] or nil
-        local should_restore = ShouldRestoreAfterStationCraft(self, recipe)
+        local station = self.current_prototyper
+        local should_unlock_station = ShouldUnlockStationRecipe(self, recipe)
         local was_buffered = self:IsBuildBuffered(recname)
         local result = old_buffer_build(self, recname, ...)
 
-        if should_restore and not was_buffered and self:IsBuildBuffered(recname) then
-            MarkRecipeGloballyRestored(recname)
+        if should_unlock_station and not was_buffered and self:IsBuildBuffered(recname) then
+            MarkRecipeUnlockedForStation(station, recname)
         end
 
         return result
     end
-end)
 
-AddPlayerPostInit(function(inst)
-    if not GLOBAL.TheWorld.ismastersim then
-        return
-    end
+    self.inst:ListenForEvent("builditem", function(inst, data)
+        SeedStationFromBuilder(self, data ~= nil and data.item or nil)
+    end)
 
-    inst:DoTaskInTime(1, function(inst)
-        local component = GLOBAL.TheWorld.components.globalblueprintunlock
-        if component ~= nil then
-            SendRestoredRecipesToClient(inst.userid, component:GetUnlockedRecipes())
-        end
+    self.inst:ListenForEvent("buildstructure", function(inst, data)
+        SeedStationFromBuilder(self, data ~= nil and data.item or nil)
     end)
 end)
 
