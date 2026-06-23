@@ -54,6 +54,68 @@ local function IsGloballyUnlocked(recipe_name)
     return component ~= nil and component:IsUnlocked(recipe_name)
 end
 
+local function BuilderKnowsRecipe(builder, recipe_name)
+    if builder == nil or builder.recipes == nil then
+        return false
+    end
+
+    for _, known_recipe_name in ipairs(builder.recipes) do
+        if known_recipe_name == recipe_name then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function CanPrototypeWithTrees(recipe_level, tech_trees)
+    if recipe_level == nil or tech_trees == nil then
+        return false
+    end
+
+    if GLOBAL.CanPrototypeRecipe ~= nil then
+        return GLOBAL.CanPrototypeRecipe(recipe_level, tech_trees)
+    end
+
+    for tech_name, required_level in pairs(recipe_level) do
+        if type(required_level) == "number"
+            and required_level > (tech_trees[tech_name] or 0) then
+            return false
+        end
+    end
+
+    return true
+end
+
+local function IsAtOriginalTechStation(builder, recipe)
+    local prototyper = builder ~= nil and builder.current_prototyper or nil
+    if prototyper == nil
+        or not prototyper:IsValid()
+        or prototyper.components.prototyper == nil then
+        return false
+    end
+
+    return CanPrototypeWithTrees(
+        recipe._blueprint_only_original_level,
+        prototyper.components.prototyper.trees
+    )
+end
+
+local function ShouldRestoreAfterStationCraft(builder, recipe)
+    return recipe ~= nil
+        and recipe._blueprint_only_locked
+        and BuilderKnowsRecipe(builder, recipe.name)
+        and IsAtOriginalTechStation(builder, recipe)
+end
+
+local function MarkRecipeGloballyRestored(recipe_name)
+    local world = GLOBAL.TheWorld
+    local component = world ~= nil and world.components.globalblueprintunlock or nil
+    if component ~= nil then
+        component:UnlockRecipe(recipe_name)
+    end
+end
+
 local function MakeRecipeBlueprintOnly(recipe)
     if recipe == nil or recipe.level == nil then
         return
@@ -130,17 +192,28 @@ AddPrefabPostInit("world", function(inst)
 end)
 
 AddComponentPostInit("builder", function(self)
-    local old_unlock_recipe = self.UnlockRecipe
-    self.UnlockRecipe = function(self, recipe_name, ...)
-        local normalized_name = type(recipe_name) == "table" and recipe_name.name or recipe_name
-        local recipe = normalized_name ~= nil and GLOBAL.AllRecipes[normalized_name] or nil
-        local was_blueprint_only = recipe ~= nil and recipe._blueprint_only_locked
-        local result = old_unlock_recipe(self, recipe_name, ...)
+    local old_do_build = self.DoBuild
+    self.DoBuild = function(self, recname, ...)
+        local recipe = recname ~= nil and GLOBAL.AllRecipes[recname] or nil
+        local should_restore = ShouldRestoreAfterStationCraft(self, recipe)
+        local result, reason = old_do_build(self, recname, ...)
 
-        if was_blueprint_only
-            and GLOBAL.TheWorld ~= nil
-            and GLOBAL.TheWorld.components.globalblueprintunlock ~= nil then
-            GLOBAL.TheWorld.components.globalblueprintunlock:UnlockRecipe(normalized_name)
+        if result and should_restore then
+            MarkRecipeGloballyRestored(recname)
+        end
+
+        return result, reason
+    end
+
+    local old_buffer_build = self.BufferBuild
+    self.BufferBuild = function(self, recname, ...)
+        local recipe = recname ~= nil and GLOBAL.AllRecipes[recname] or nil
+        local should_restore = ShouldRestoreAfterStationCraft(self, recipe)
+        local was_buffered = self:IsBuildBuffered(recname)
+        local result = old_buffer_build(self, recname, ...)
+
+        if should_restore and not was_buffered and self:IsBuildBuffered(recname) then
+            MarkRecipeGloballyRestored(recname)
         end
 
         return result
