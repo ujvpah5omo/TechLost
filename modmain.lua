@@ -1,6 +1,7 @@
 local GLOBAL = GLOBAL
 
 local BLUEPRINT_ONLY_TECH = (GLOBAL.TECH and GLOBAL.TECH.LOST) or { LOST = 1 }
+local lose_tech_on_death = GetModConfigData("lose_tech_on_death") == true
 
 -- Keep a non-zero floor so every restricted recipe remains obtainable even
 -- when upgrading a world whose old configuration had drops disabled.
@@ -315,7 +316,7 @@ AddComponentPostInit("builder", function(self)
         SeedStationFromBuilder(self, data ~= nil and data.item or nil)
     end)
 
-    if self.inst:HasTag("player") then
+    if lose_tech_on_death and self.inst:HasTag("player") then
         self.inst:ListenForEvent("death", function()
             LoseLearnedRecipes(self)
         end)

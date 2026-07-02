@@ -2,10 +2,10 @@ name = "全科技蓝图解锁"
 description = [[
 所有需要科技的配方初始只能通过蓝图解锁。玩家学习蓝图后可自行制作，也可把已掌握配方带进新建科技站。
 
-角色死亡会丢失全部已学科技。每台科技站独立保存公开配方，其他玩家可通过该站制作并学会；全部受限配方都可从风滚草获得蓝图。
+角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方，其他玩家可通过该站制作并学会；全部受限配方都可从风滚草获得蓝图。
 ]]
 author = "Codex"
-version = "2.5.0"
+version = "2.5.1"
 
 api_version = 10
 dst_compatible = true
@@ -19,6 +19,17 @@ server_only_mod = false
 
 configuration_options =
 {
+    {
+        name = "lose_tech_on_death",
+        label = "死亡丢失科技",
+        hover = "开启后，角色死亡会清空全部已学习配方；科技站公开进度不受影响。",
+        options =
+        {
+            { description = "开启", data = true },
+            { description = "关闭", data = false },
+        },
+        default = false,
+    },
     {
         name = "tumbleweed_blueprint_chance",
         label = "风滚草蓝图概率",
