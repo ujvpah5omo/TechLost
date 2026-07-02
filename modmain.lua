@@ -1,6 +1,7 @@
 local GLOBAL = GLOBAL
 
 local BLUEPRINT_ONLY_TECH = (GLOBAL.TECH and GLOBAL.TECH.LOST) or { LOST = 1 }
+local include_ancient_tech = GetModConfigData("include_ancient_tech") == true
 local lose_tech_on_death = GetModConfigData("lose_tech_on_death") == true
 
 -- Keep a non-zero floor so every restricted recipe remains obtainable even
@@ -24,8 +25,21 @@ local function RequiresTechnology(level)
     return false
 end
 
-local function IsBlueprintCompatible(recipe)
-    if recipe.nounlock
+local function RequiresAncientTechnology(level)
+    return level ~= nil
+        and type(level.ANCIENT) == "number"
+        and level.ANCIENT > 0
+end
+
+local function IsBlueprintCompatible(recipe, original_level)
+    local is_ancient_recipe = RequiresAncientTechnology(
+        original_level
+            or recipe._blueprint_only_original_level
+            or recipe.level
+    )
+
+    if (is_ancient_recipe and not include_ancient_tech)
+        or (recipe.nounlock and not is_ancient_recipe)
         or recipe.builder_tag ~= nil
         or recipe.noblueprint
         or recipe.no_blueprint
@@ -43,6 +57,10 @@ end
 local function RestoreRecipe(recipe)
     if recipe._blueprint_only_locked then
         recipe.level = recipe._blueprint_only_original_level
+        if recipe._blueprint_only_original_nounlock ~= nil then
+            recipe.nounlock = recipe._blueprint_only_original_nounlock
+            recipe._blueprint_only_original_nounlock = nil
+        end
         recipe._blueprint_only_original_level = nil
         recipe._blueprint_only_locked = nil
     end
@@ -89,6 +107,20 @@ local function CanPrototypeWithTrees(recipe_level, tech_trees)
     return true
 end
 
+local function IsRestrictedAncientRecipe(recipe)
+    return recipe ~= nil
+        and recipe._blueprint_only_locked
+        and RequiresAncientTechnology(recipe._blueprint_only_original_level)
+end
+
+local function ResolveRecipe(recipe)
+    if type(recipe) == "string" then
+        return GLOBAL.AllRecipes[recipe]
+    end
+
+    return recipe
+end
+
 local function IsAtOriginalTechStation(builder, recipe)
     local prototyper = builder ~= nil and builder.current_prototyper or nil
     if prototyper == nil
@@ -101,6 +133,29 @@ local function IsAtOriginalTechStation(builder, recipe)
         recipe._blueprint_only_original_level,
         prototyper.components.prototyper.trees
     )
+end
+
+local function IsReplicaAtOriginalTechStation(builder, recipe)
+    local server_builder = builder ~= nil
+        and builder.inst ~= nil
+        and builder.inst.components ~= nil
+        and builder.inst.components.builder
+        or nil
+    if server_builder ~= nil then
+        return IsAtOriginalTechStation(server_builder, recipe)
+    end
+
+    local prototyper = builder ~= nil
+        and builder.GetCurrentPrototyper ~= nil
+        and builder:GetCurrentPrototyper()
+        or nil
+    return prototyper ~= nil
+        and prototyper:IsValid()
+        and builder.GetTechTrees ~= nil
+        and CanPrototypeWithTrees(
+            recipe._blueprint_only_original_level,
+            builder:GetTechTrees()
+        )
 end
 
 local function ShouldUnlockStationRecipe(builder, recipe)
@@ -131,7 +186,7 @@ local function MakeRecipeBlueprintOnly(recipe)
         and recipe._blueprint_only_original_level
         or recipe.level
 
-    if not IsBlueprintCompatible(recipe)
+    if not IsBlueprintCompatible(recipe, original_level)
         or not RequiresTechnology(original_level) then
         RestoreRecipe(recipe)
         return
@@ -141,6 +196,10 @@ local function MakeRecipeBlueprintOnly(recipe)
         -- LOST tech cannot be prototyped, but learning the recipe from a
         -- blueprint still adds it to the builder's known recipe list.
         recipe._blueprint_only_original_level = recipe.level
+        if recipe.nounlock and RequiresAncientTechnology(recipe.level) then
+            recipe._blueprint_only_original_nounlock = recipe.nounlock
+            recipe.nounlock = false
+        end
     end
 
     recipe.level = BLUEPRINT_ONLY_TECH
@@ -270,7 +329,35 @@ AddComponentPostInit("prototyper", function(self)
     end
 end)
 
+AddComponentPostInit("teacher", function(self)
+    local old_teach = self.Teach
+    self.Teach = function(self, target, ...)
+        local recipe = self.recipe ~= nil and GLOBAL.AllRecipes[self.recipe] or nil
+        local builder = target ~= nil
+            and target.components ~= nil
+            and target.components.builder
+            or nil
+        if IsRestrictedAncientRecipe(recipe)
+            and BuilderKnowsRecipe(builder, recipe.name) then
+            return false, "KNOWN"
+        end
+
+        return old_teach(self, target, ...)
+    end
+end)
+
 AddComponentPostInit("builder", function(self)
+    local old_knows_recipe = self.KnowsRecipe
+    self.KnowsRecipe = function(self, recipe, ...)
+        local recipe_data = ResolveRecipe(recipe)
+        if IsRestrictedAncientRecipe(recipe_data)
+            and not IsAtOriginalTechStation(self, recipe_data) then
+            return false
+        end
+
+        return old_knows_recipe(self, recipe, ...)
+    end
+
     local old_evaluate_tech_trees = self.EvaluateTechTrees
     self.EvaluateTechTrees = function(self, ...)
         ClearStationUnlockedRecipes(self)
@@ -282,6 +369,12 @@ AddComponentPostInit("builder", function(self)
     local old_do_build = self.DoBuild
     self.DoBuild = function(self, recname, ...)
         local recipe = recname ~= nil and GLOBAL.AllRecipes[recname] or nil
+        if IsRestrictedAncientRecipe(recipe)
+            and not self:IsBuildBuffered(recname)
+            and not IsAtOriginalTechStation(self, recipe) then
+            return false
+        end
+
         local station = self.current_prototyper
         local should_unlock_station = ShouldUnlockStationRecipe(self, recipe)
         local result, reason = old_do_build(self, recname, ...)
@@ -322,6 +415,21 @@ AddComponentPostInit("builder", function(self)
         end)
     end
 end)
+
+if AddClassPostConstruct ~= nil then
+    AddClassPostConstruct("components/builder_replica", function(self)
+        local old_knows_recipe = self.KnowsRecipe
+        self.KnowsRecipe = function(self, recipe, ...)
+            local recipe_data = ResolveRecipe(recipe)
+            if IsRestrictedAncientRecipe(recipe_data)
+                and not IsReplicaAtOriginalTechStation(self, recipe_data) then
+                return false
+            end
+
+            return old_knows_recipe(self, recipe, ...)
+        end
+    end)
+end
 
 -- Cover recipes registered after this mod, including recipes from other mods.
 if AddRecipePostInitAny ~= nil then
