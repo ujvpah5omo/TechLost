@@ -241,6 +241,26 @@ local function SeedStationFromBuilder(builder, station)
     end
 end
 
+local function LoseLearnedRecipes(builder)
+    if builder == nil or builder.recipes == nil or #builder.recipes == 0 then
+        return
+    end
+
+    -- Remove recipes through the component API so the replica is updated too.
+    -- Copy first because RemoveRecipe mutates builder.recipes.
+    local learned_recipes = {}
+    for i, recipe_name in ipairs(builder.recipes) do
+        learned_recipes[i] = recipe_name
+    end
+
+    for _, recipe_name in ipairs(learned_recipes) do
+        builder:RemoveRecipe(recipe_name)
+    end
+
+    -- A nearby station may still publicly provide some of the lost recipes.
+    ApplyStationUnlockedRecipes(builder)
+end
+
 AddComponentPostInit("prototyper", function(self)
     if GLOBAL.TheWorld ~= nil
         and GLOBAL.TheWorld.ismastersim
@@ -294,6 +314,12 @@ AddComponentPostInit("builder", function(self)
     self.inst:ListenForEvent("buildstructure", function(inst, data)
         SeedStationFromBuilder(self, data ~= nil and data.item or nil)
     end)
+
+    if self.inst:HasTag("player") then
+        self.inst:ListenForEvent("death", function()
+            LoseLearnedRecipes(self)
+        end)
+    end
 end)
 
 -- Cover recipes registered after this mod, including recipes from other mods.
