@@ -5,7 +5,7 @@ description = [[
 角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方，其他玩家可通过该站制作并学会；全部受限配方都可从风滚草获得蓝图。
 ]]
 author = "Codex"
-version = "2.6.0"
+version = "2.7.0"
 
 api_version = 10
 dst_compatible = true
@@ -23,6 +23,28 @@ configuration_options =
         name = "include_ancient_tech",
         label = "远古塔科技蓝图",
         hover = "开启后，远古伪科学站配方会进入蓝图池；学习蓝图后仍需靠近对应远古塔制作。关闭时保留原版方式。",
+        options =
+        {
+            { description = "关闭", data = false },
+            { description = "开启", data = true },
+        },
+        default = false,
+    },
+    {
+        name = "include_lunar_forge_tech",
+        label = "辉煌铁匠铺科技蓝图",
+        hover = "开启后，辉煌铁匠铺配方会进入蓝图池；学习蓝图后仍需靠近辉煌铁匠铺制作。",
+        options =
+        {
+            { description = "关闭", data = false },
+            { description = "开启", data = true },
+        },
+        default = false,
+    },
+    {
+        name = "include_shadow_forge_tech",
+        label = "暗影操纵基座科技蓝图",
+        hover = "开启后，暗影操纵基座配方会进入蓝图池；学习蓝图后仍需靠近暗影操纵基座制作。",
         options =
         {
             { description = "关闭", data = false },
