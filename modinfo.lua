@@ -5,7 +5,7 @@ description = [[
 角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方，其他玩家可通过该站制作并学会；全部受限配方都可从风滚草获得蓝图。
 ]]
 author = "Codex"
-version = "2.7.2"
+version = "2.8.0"
 
 api_version = 10
 dst_compatible = true
@@ -19,6 +19,17 @@ server_only_mod = false
 
 configuration_options =
 {
+    {
+        name = "include_skill_tree_recipes",
+        label = "技能树配方蓝图",
+        hover = "开启后，受技能树限制的可制作配方会进入蓝图池；仍需激活对应技能才能学习和制作。",
+        options =
+        {
+            { description = "关闭", data = false },
+            { description = "开启", data = true },
+        },
+        default = false,
+    },
     {
         name = "include_ancient_tech",
         label = "远古塔科技蓝图",

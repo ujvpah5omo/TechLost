@@ -4,6 +4,8 @@ local BLUEPRINT_ONLY_TECH = (GLOBAL.TECH and GLOBAL.TECH.LOST) or { LOST = 1 }
 local include_ancient_tech = GetModConfigData("include_ancient_tech") == true
 local include_lunar_forge_tech = GetModConfigData("include_lunar_forge_tech") == true
 local include_shadow_forge_tech = GetModConfigData("include_shadow_forge_tech") == true
+local include_skill_tree_recipes =
+    GetModConfigData("include_skill_tree_recipes") == true
 local lose_tech_on_death = GetModConfigData("lose_tech_on_death") == true
 
 -- Keep a non-zero floor so every restricted recipe remains obtainable even
@@ -25,6 +27,11 @@ local function RequiresTechnology(level)
     end
 
     return false
+end
+
+local function RequiresBlueprintLearning(recipe, level)
+    return RequiresTechnology(level)
+        or (include_skill_tree_recipes and recipe.builder_skill ~= nil)
 end
 
 local function GetOptionalStationTechnologyEnabled(level)
@@ -73,11 +80,16 @@ local function IsBlueprintCompatible(recipe, original_level)
         or recipe.level
     local optional_station_tech_enabled =
         GetOptionalStationTechnologyEnabled(recipe_level)
+    local skill_tree_recipe_enabled =
+        include_skill_tree_recipes and recipe.builder_skill ~= nil
 
     if IsInactiveSpecialEventTechnology(recipe_level)
         or optional_station_tech_enabled == false
-        or (recipe.nounlock and optional_station_tech_enabled == nil)
+        or (recipe.nounlock
+            and optional_station_tech_enabled ~= true
+            and not skill_tree_recipe_enabled)
         or recipe.builder_tag ~= nil
+        or (recipe.builder_skill ~= nil and not include_skill_tree_recipes)
         or recipe.noblueprint
         or recipe.no_blueprint
         or type(recipe.name) ~= "string" then
@@ -226,7 +238,7 @@ local function MakeRecipeBlueprintOnly(recipe)
         or recipe.level
 
     if not IsBlueprintCompatible(recipe, original_level)
-        or not RequiresTechnology(original_level) then
+        or not RequiresBlueprintLearning(recipe, original_level) then
         RestoreRecipe(recipe)
         return
     end
@@ -236,7 +248,9 @@ local function MakeRecipeBlueprintOnly(recipe)
         -- blueprint still adds it to the builder's known recipe list.
         recipe._blueprint_only_original_level = recipe.level
         if recipe.nounlock
-            and GetOptionalStationTechnologyEnabled(recipe.level) == true then
+            and (GetOptionalStationTechnologyEnabled(recipe.level) == true
+                or (include_skill_tree_recipes
+                    and recipe.builder_skill ~= nil)) then
             recipe._blueprint_only_original_nounlock = recipe.nounlock
             recipe.nounlock = false
         end
@@ -520,7 +534,8 @@ local function RepairUnknownBlueprint(blueprint)
     local candidates = GetTumbleweedBlueprintRecipes()
     if #candidates == 0 then
         for _, recipe in pairs(GLOBAL.AllRecipes) do
-            if IsBlueprintCompatible(recipe) and RequiresTechnology(recipe.level) then
+            if IsBlueprintCompatible(recipe)
+                and RequiresBlueprintLearning(recipe, recipe.level) then
                 candidates[#candidates + 1] = recipe
             end
         end
