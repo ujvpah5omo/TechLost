@@ -49,14 +49,33 @@ local function GetOptionalStationTechnologyEnabled(level)
     return nil
 end
 
-local function IsBlueprintCompatible(recipe, original_level)
-    local optional_station_tech_enabled = GetOptionalStationTechnologyEnabled(
-        original_level
-            or recipe._blueprint_only_original_level
-            or recipe.level
-    )
+local function IsInactiveSpecialEventTechnology(level)
+    if level == nil
+        or GLOBAL.SPECIAL_EVENTS == nil
+        or GLOBAL.TECH == nil then
+        return false
+    end
 
-    if optional_station_tech_enabled == false
+    for event_key, event_name in pairs(GLOBAL.SPECIAL_EVENTS) do
+        if event_name ~= GLOBAL.SPECIAL_EVENTS.NONE
+            and GLOBAL.TECH[event_key] == level then
+            return GLOBAL.IsSpecialEventActive == nil
+                or not GLOBAL.IsSpecialEventActive(event_name)
+        end
+    end
+
+    return false
+end
+
+local function IsBlueprintCompatible(recipe, original_level)
+    local recipe_level = original_level
+        or recipe._blueprint_only_original_level
+        or recipe.level
+    local optional_station_tech_enabled =
+        GetOptionalStationTechnologyEnabled(recipe_level)
+
+    if IsInactiveSpecialEventTechnology(recipe_level)
+        or optional_station_tech_enabled == false
         or (recipe.nounlock and optional_station_tech_enabled == nil)
         or recipe.builder_tag ~= nil
         or recipe.noblueprint
