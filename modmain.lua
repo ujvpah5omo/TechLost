@@ -30,11 +30,19 @@ end
 local function GetOptionalStationTechnologyEnabled(level)
     if level == nil then
         return nil
-    elseif type(level.ANCIENT) == "number" and level.ANCIENT > 0 then
+    -- TECH.LOST uses level 10 (including ANCIENT = 10), so only treat
+    -- attainable station levels below 10 as optional station technology.
+    elseif type(level.ANCIENT) == "number"
+        and level.ANCIENT > 0
+        and level.ANCIENT < 10 then
         return include_ancient_tech
-    elseif type(level.LUNARFORGING) == "number" and level.LUNARFORGING > 0 then
+    elseif type(level.LUNARFORGING) == "number"
+        and level.LUNARFORGING > 0
+        and level.LUNARFORGING < 10 then
         return include_lunar_forge_tech
-    elseif type(level.SHADOWFORGING) == "number" and level.SHADOWFORGING > 0 then
+    elseif type(level.SHADOWFORGING) == "number"
+        and level.SHADOWFORGING > 0
+        and level.SHADOWFORGING < 10 then
         return include_shadow_forge_tech
     end
 
