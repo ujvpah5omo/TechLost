@@ -497,11 +497,23 @@ AddSimPostInit(function()
     end
 end)
 
+local function IsBlueprintPoolRecipe(recipe)
+    if recipe == nil then
+        return false
+    end
+
+    local original_level = recipe._blueprint_only_locked
+        and recipe._blueprint_only_original_level
+        or recipe.level
+    return IsBlueprintCompatible(recipe, original_level)
+        and RequiresBlueprintLearning(recipe, original_level)
+end
+
 local function GetTumbleweedBlueprintRecipes()
     local candidates = {}
 
     for _, recipe in pairs(GLOBAL.AllRecipes) do
-        if recipe._blueprint_only_locked and IsBlueprintCompatible(recipe) then
+        if recipe._blueprint_only_locked and IsBlueprintPoolRecipe(recipe) then
             candidates[#candidates + 1] = recipe
         end
     end
@@ -526,16 +538,19 @@ local function ConfigureBlueprint(blueprint, recipe)
     return true
 end
 
-local function RepairUnknownBlueprint(blueprint)
-    if blueprint.recipetouse ~= nil and blueprint.recipetouse ~= "unknown" then
+local function RepairInvalidBlueprint(blueprint)
+    local current_recipe = blueprint.recipetouse ~= nil
+        and GLOBAL.AllRecipes[blueprint.recipetouse]
+        or nil
+    if blueprint.recipetouse ~= "unknown"
+        and IsBlueprintPoolRecipe(current_recipe) then
         return
     end
 
     local candidates = GetTumbleweedBlueprintRecipes()
     if #candidates == 0 then
         for _, recipe in pairs(GLOBAL.AllRecipes) do
-            if IsBlueprintCompatible(recipe)
-                and RequiresBlueprintLearning(recipe, recipe.level) then
+            if IsBlueprintPoolRecipe(recipe) then
                 candidates[#candidates + 1] = recipe
             end
         end
@@ -549,21 +564,21 @@ local function RepairUnknownBlueprint(blueprint)
     ConfigureBlueprint(blueprint, recipe)
 end
 
--- The vanilla random blueprint generator excludes TECH.LOST. Since this mod
--- intentionally uses LOST, replace its empty "unknown" result with our pool.
+-- Vanilla random blueprints exclude TECH.LOST but do not exclude builder_skill.
+-- Replace unknown or configuration-excluded results with our filtered pool.
 AddPrefabPostInit("blueprint", function(inst)
     if not GLOBAL.TheWorld.ismastersim then
         return
     end
 
-    RepairUnknownBlueprint(inst)
+    RepairInvalidBlueprint(inst)
 
     local old_onload = inst.OnLoad
     inst.OnLoad = function(inst, data)
         if old_onload ~= nil then
             old_onload(inst, data)
         end
-        RepairUnknownBlueprint(inst)
+        RepairInvalidBlueprint(inst)
     end
 end)
 
