@@ -29,9 +29,18 @@ local function RequiresTechnology(level)
     return false
 end
 
+local function IsNativeLostTechnology(level)
+    return level == BLUEPRINT_ONLY_TECH
+        or (level ~= nil
+            and level.SCIENCE == 10
+            and level.MAGIC == 10
+            and level.ANCIENT == 10)
+end
+
 local function RequiresBlueprintLearning(recipe, level)
-    return RequiresTechnology(level)
-        or (include_skill_tree_recipes and recipe.builder_skill ~= nil)
+    return not IsNativeLostTechnology(level)
+        and (RequiresTechnology(level)
+            or (include_skill_tree_recipes and recipe.builder_skill ~= nil))
 end
 
 local function GetOptionalStationTechnologyEnabled(level)
