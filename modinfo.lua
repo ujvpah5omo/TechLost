@@ -5,7 +5,7 @@ description = [[
 角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的配方可从风滚草获得蓝图。
 ]]
 author = "Codex"
-version = "2.9.0"
+version = "2.9.1"
 
 api_version = 10
 dst_compatible = true

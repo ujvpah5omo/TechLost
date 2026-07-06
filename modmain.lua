@@ -551,6 +551,18 @@ local function RepairInvalidBlueprint(blueprint)
     local current_recipe = blueprint.recipetouse ~= nil
         and GLOBAL.AllRecipes[blueprint.recipetouse]
         or nil
+    local current_original_level = current_recipe ~= nil
+        and current_recipe._blueprint_only_locked
+        and current_recipe._blueprint_only_original_level
+        or (current_recipe ~= nil and current_recipe.level or nil)
+
+    -- Specific rare blueprint prefabs also identify themselves as "blueprint".
+    -- Preserve native TECH.LOST rewards such as Antlion's fixed blueprints.
+    if blueprint.is_rare
+        and IsNativeLostTechnology(current_original_level) then
+        return
+    end
+
     if blueprint.recipetouse ~= "unknown"
         and IsBlueprintPoolRecipe(current_recipe) then
         return
