@@ -83,6 +83,10 @@ local function IsInactiveSpecialEventTechnology(level)
     return false
 end
 
+local function IsProgressionStationKitRecipe(recipe)
+    return recipe ~= nil and recipe.name == "shadow_forge_kit"
+end
+
 local function IsBlueprintCompatible(recipe, original_level)
     local recipe_level = original_level
         or recipe._blueprint_only_original_level
@@ -92,7 +96,8 @@ local function IsBlueprintCompatible(recipe, original_level)
     local skill_tree_recipe_enabled =
         include_skill_tree_recipes and recipe.builder_skill ~= nil
 
-    if IsInactiveSpecialEventTechnology(recipe_level)
+    if IsProgressionStationKitRecipe(recipe)
+        or IsInactiveSpecialEventTechnology(recipe_level)
         or optional_station_tech_enabled == false
         or (recipe.nounlock
             and optional_station_tech_enabled ~= true
