@@ -9,7 +9,33 @@ local include_lunar_forge_tech = GetModConfigData("include_lunar_forge_tech") ==
 local include_shadow_forge_tech = GetModConfigData("include_shadow_forge_tech") == true
 local include_skill_tree_recipes =
     GetModConfigData("include_skill_tree_recipes") == true
+local include_character_tag_recipes =
+    GetModConfigData("include_character_tag_recipes") == true
 local lose_tech_on_death = GetModConfigData("lose_tech_on_death") == true
+
+local CHARACTER_RECIPE_TAG_OWNERS = {
+    pyromaniac = "willow",
+    masterchef = "warly",
+    professionalchef = "warly",
+    merm_builder = "wurt",
+    ghostlyfriend = "wendy",
+    elixirbrewer = "wendy",
+    werehuman = "woodie",
+    valkyrie = "wathgrithr",
+    battlesinger = "wathgrithr",
+    pebblemaker = "walter",
+    pinetreepioneer = "walter",
+    strongman = "wolfgang",
+    bookbuilder = "wickerbottom",
+    shadowmagic = "waxwell",
+    handyperson = "winona",
+    portableengineer = "winona",
+    spiderwhisperer = "webber",
+    plantkin = "wormwood",
+    clockmaker = "wanda",
+    balloonomancer = "wes",
+    upgrademoduleowner = "wx78",
+}
 
 -- Keep a non-zero floor so every restricted recipe remains obtainable even
 -- when upgrading a world whose old configuration had drops disabled.
@@ -44,6 +70,46 @@ local function RequiresBlueprintLearning(recipe, level)
     return not IsNativeLostTechnology(level)
         and (RequiresTechnology(level)
             or (include_skill_tree_recipes and recipe.builder_skill ~= nil))
+end
+
+local function IsSkillTreeTechnologyRecipe(recipe, level)
+    return recipe ~= nil
+        and recipe.builder_skill ~= nil
+        and RequiresTechnology(level)
+        and not IsNativeLostTechnology(level)
+end
+
+local function IsSelectableCharacter(character)
+    if type(character) ~= "string" then
+        return false
+    end
+
+    local selectable_characters = GLOBAL.GetSelectableCharacterList ~= nil
+        and GLOBAL.GetSelectableCharacterList()
+        or nil
+    if selectable_characters ~= nil then
+        return table.contains(selectable_characters, character)
+    end
+
+    return (GLOBAL.DST_CHARACTERLIST ~= nil
+            and table.contains(GLOBAL.DST_CHARACTERLIST, character))
+        or (GLOBAL.MODCHARACTERLIST ~= nil
+            and table.contains(GLOBAL.MODCHARACTERLIST, character))
+end
+
+local function IsCharacterTagRecipeEnabled(recipe, level)
+    if not include_character_tag_recipes
+        or recipe == nil
+        or recipe.builder_tag == nil
+        or recipe.builder_skill ~= nil
+        or not RequiresTechnology(level)
+        or IsNativeLostTechnology(level) then
+        return false
+    end
+
+    return IsSelectableCharacter(
+        CHARACTER_RECIPE_TAG_OWNERS[recipe.builder_tag]
+    )
 end
 
 local function GetOptionalStationTechnologyEnabled(level)
@@ -193,17 +259,29 @@ local function IsBlueprintCompatible(recipe, original_level)
         or recipe.level
     local optional_station_tech_enabled =
         GetOptionalStationTechnologyEnabled(recipe_level)
+    local skill_tree_technology_recipe =
+        IsSkillTreeTechnologyRecipe(recipe, recipe_level)
     local skill_tree_recipe_enabled =
-        include_skill_tree_recipes and recipe.builder_skill ~= nil
+        include_skill_tree_recipes
+        and recipe.builder_skill ~= nil
+        and not skill_tree_technology_recipe
+    local skill_tree_technology_recipe_enabled =
+        not include_skill_tree_recipes and skill_tree_technology_recipe
+    local character_tag_recipe_enabled =
+        IsCharacterTagRecipeEnabled(recipe, recipe_level)
 
     if IsProgressionStationKitRecipe(recipe)
         or IsInactiveSpecialEventTechnology(recipe_level)
         or optional_station_tech_enabled == false
         or (recipe.nounlock
             and optional_station_tech_enabled ~= true
-            and not skill_tree_recipe_enabled)
-        or recipe.builder_tag ~= nil
-        or (recipe.builder_skill ~= nil and not include_skill_tree_recipes)
+            and not skill_tree_recipe_enabled
+            and not skill_tree_technology_recipe_enabled
+            and not character_tag_recipe_enabled)
+        or (recipe.builder_tag ~= nil and not character_tag_recipe_enabled)
+        or (recipe.builder_skill ~= nil
+            and not skill_tree_recipe_enabled
+            and not skill_tree_technology_recipe_enabled)
         or recipe.noblueprint
         or recipe.no_blueprint
         or type(recipe.name) ~= "string" then
@@ -364,7 +442,11 @@ local function MakeRecipeBlueprintOnly(recipe)
         if recipe.nounlock
             and (GetOptionalStationTechnologyEnabled(recipe.level) == true
                 or (include_skill_tree_recipes
-                    and recipe.builder_skill ~= nil)) then
+                    and recipe.builder_skill ~= nil
+                    and not IsSkillTreeTechnologyRecipe(recipe, recipe.level))
+                or (not include_skill_tree_recipes
+                    and IsSkillTreeTechnologyRecipe(recipe, recipe.level))
+                or IsCharacterTagRecipeEnabled(recipe, recipe.level)) then
             recipe._blueprint_only_original_nounlock = recipe.nounlock
             recipe.nounlock = false
         end
