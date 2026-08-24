@@ -12,6 +12,10 @@ local include_skill_tree_recipes =
 local include_character_tag_recipes =
     GetModConfigData("include_character_tag_recipes") == true
 local lose_tech_on_death = GetModConfigData("lose_tech_on_death") == true
+local sunken_treasure_advanced_blueprint_chance =
+    GetModConfigData("sunken_treasure_advanced_blueprints") or 0
+local pirate_treasure_advanced_blueprint_chance =
+    GetModConfigData("pirate_treasure_advanced_blueprints") or 0
 
 local CHARACTER_RECIPE_TAG_OWNERS = {
     pyromaniac = "willow",
@@ -35,6 +39,45 @@ local CHARACTER_RECIPE_TAG_OWNERS = {
     clockmaker = "wanda",
     balloonomancer = "wes",
     upgrademoduleowner = "wx78",
+}
+
+local SUNKEN_TREASURE_HIGH_GEMS = {
+    greengem = true,
+    yellowgem = true,
+}
+
+local SUNKEN_TREASURE_SPLUNKER_ITEMS = {
+    armorruins = true,
+    multitool_axe_pickaxe = true,
+}
+
+local SUNKEN_TREASURE_TRAVELER_ITEMS = {
+    cane = true,
+    gnarwail_horn = true,
+}
+
+local SUNKEN_TREASURE_MINER_ITEMS = {
+    goldenpickaxe = true,
+    moonglass = true,
+    moonrocknugget = true,
+}
+
+local SUNKEN_TREASURE_MARKER_ITEMS = {
+    boatpatch = true,
+    cookiecuttershell = true,
+    saltrock = true,
+    cane = true,
+    papyrus = true,
+    gnarwail_horn = true,
+    malbatross_feather = true,
+    oceanfishingrod = true,
+    boat_ancient_item = true,
+    goldenpickaxe = true,
+    moonglass = true,
+    moonrocknugget = true,
+    armorruins = true,
+    multitool_axe_pickaxe = true,
+    thulecite = true,
 }
 
 -- Keep a non-zero floor so every restricted recipe remains obtainable even
@@ -718,6 +761,32 @@ local function GetTumbleweedBlueprintRecipes()
     return candidates
 end
 
+local function IsAdvancedBlueprintPoolRecipe(recipe)
+    if recipe == nil then
+        return false
+    end
+
+    local original_level = recipe._blueprint_only_locked
+        and recipe._blueprint_only_original_level
+        or recipe.level
+    return IsBlueprintPoolRecipe(recipe)
+        and (GetOptionalStationTechnologyEnabled(original_level) ~= nil
+            or IsCharacterTagRecipeEnabled(recipe, original_level)
+            or IsSkillTreeTechnologyRecipe(recipe, original_level))
+end
+
+local function GetAdvancedBlueprintRecipes()
+    local candidates = {}
+
+    for _, recipe in pairs(GLOBAL.AllRecipes) do
+        if recipe._blueprint_only_locked and IsAdvancedBlueprintPoolRecipe(recipe) then
+            candidates[#candidates + 1] = recipe
+        end
+    end
+
+    return candidates
+end
+
 local function ConfigureBlueprint(blueprint, recipe)
     if blueprint == nil or recipe == nil or blueprint.components.teacher == nil then
         return false
@@ -733,6 +802,153 @@ local function ConfigureBlueprint(blueprint, recipe)
     end
 
     return true
+end
+
+local function GiveAdvancedBlueprint(container_owner)
+    local candidates = GetAdvancedBlueprintRecipes()
+    if #candidates == 0 then
+        return false
+    end
+
+    local blueprint = GLOBAL.SpawnPrefab("blueprint")
+    if blueprint == nil
+        or not ConfigureBlueprint(blueprint, candidates[math.random(#candidates)]) then
+        if blueprint ~= nil then
+            blueprint:Remove()
+        end
+        return false
+    end
+
+    local container = container_owner ~= nil
+        and container_owner.components ~= nil
+        and container_owner.components.container
+        or nil
+    if container ~= nil then
+        if container:IsFull() then
+            blueprint:Remove()
+            return false
+        end
+        if container:GiveItem(blueprint) ~= nil then
+            return true
+        end
+        blueprint:Remove()
+        return false
+    end
+
+    local inventory = container_owner ~= nil
+        and container_owner.components ~= nil
+        and container_owner.components.inventory
+        or nil
+    if inventory ~= nil then
+        local item_count = GetTableSize(inventory.itemslots)
+        if inventory.maxslots ~= nil and item_count >= inventory.maxslots then
+            blueprint:Remove()
+            return false
+        end
+        if inventory:GiveItem(blueprint) ~= nil then
+            return true
+        end
+        blueprint:Remove()
+        return false
+    end
+
+    blueprint:Remove()
+    return false
+end
+
+local function ForEachStoredItem(container_owner, fn)
+    if container_owner == nil
+        or container_owner.components == nil
+        or fn == nil then
+        return
+    end
+
+    local container = container_owner.components.container
+    if container ~= nil and container.slots ~= nil then
+        for _, item in pairs(container.slots) do
+            fn(item)
+        end
+    end
+
+    local inventory = container_owner.components.inventory
+    if inventory ~= nil and inventory.itemslots ~= nil then
+        for _, item in pairs(inventory.itemslots) do
+            fn(item)
+        end
+    end
+end
+
+local function StoredItemMatches(container_owner, prefabs)
+    local matched = false
+    ForEachStoredItem(container_owner, function(item)
+        if item ~= nil and prefabs[item.prefab] then
+            matched = true
+        end
+    end)
+    return matched
+end
+
+local function HasSunkenTreasureMarker(container_owner)
+    return StoredItemMatches(container_owner, SUNKEN_TREASURE_MARKER_ITEMS)
+end
+
+local function GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
+    if sunken_treasure_advanced_blueprint_chance <= 0 then
+        return 0
+    end
+
+    local is_splunker =
+        StoredItemMatches(sunken_chest, SUNKEN_TREASURE_SPLUNKER_ITEMS)
+    local is_traveler =
+        StoredItemMatches(sunken_chest, SUNKEN_TREASURE_TRAVELER_ITEMS)
+    local is_miner =
+        StoredItemMatches(sunken_chest, SUNKEN_TREASURE_MINER_ITEMS)
+    local has_high_gem =
+        StoredItemMatches(sunken_chest, SUNKEN_TREASURE_HIGH_GEMS)
+
+    if is_splunker then
+        return has_high_gem and 2 or 1
+    elseif is_traveler then
+        return 1
+    elseif is_miner and has_high_gem then
+        return 1
+    end
+
+    return math.random() < sunken_treasure_advanced_blueprint_chance and 1 or 0
+end
+
+local function AddSunkenTreasureAdvancedBlueprints(sunken_chest)
+    if sunken_treasure_advanced_blueprint_chance <= 0
+        or sunken_chest == nil
+        or sunken_chest._techlost_advanced_blueprints_checked
+        or (sunken_chest.GetCurrentPlatform ~= nil
+            and sunken_chest:GetCurrentPlatform() ~= nil) then
+        return
+    end
+
+    sunken_chest._techlost_advanced_blueprints_checked = true
+
+    local count = GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
+    for _ = 1, count do
+        if not GiveAdvancedBlueprint(sunken_chest) then
+            return
+        end
+    end
+end
+
+local function AddPirateTreasureAdvancedBlueprint(stash)
+    if pirate_treasure_advanced_blueprint_chance <= 0
+        or stash == nil
+        or stash._techlost_advanced_blueprints_checked then
+        return
+    end
+
+    stash._techlost_advanced_blueprints_checked = true
+
+    if stash._techlost_has_sunken_treasure
+        or math.random() < pirate_treasure_advanced_blueprint_chance then
+        GiveAdvancedBlueprint(stash)
+    end
 end
 
 local function RepairInvalidBlueprint(blueprint)
@@ -788,6 +1004,63 @@ AddPrefabPostInit("blueprint", function(inst)
             old_onload(inst, data)
         end
         RepairInvalidBlueprint(inst)
+    end
+end)
+
+AddPrefabPostInit("sunkenchest", function(inst)
+    if not GLOBAL.TheWorld.ismastersim then
+        return
+    end
+
+    local old_onsave = inst.OnSave
+    inst.OnSave = function(inst, data)
+        if old_onsave ~= nil then
+            old_onsave(inst, data)
+        end
+        data.techlost_advanced_blueprints_checked =
+            inst._techlost_advanced_blueprints_checked or nil
+    end
+
+    local old_onload = inst.OnLoad
+    inst.OnLoad = function(inst, data)
+        if old_onload ~= nil then
+            old_onload(inst, data)
+        end
+        if data ~= nil then
+            inst._techlost_advanced_blueprints_checked =
+                data.techlost_advanced_blueprints_checked or nil
+        end
+    end
+
+    inst:DoTaskInTime(0, AddSunkenTreasureAdvancedBlueprints)
+end)
+
+AddPrefabPostInit("pirate_stash", function(inst)
+    if not GLOBAL.TheWorld.ismastersim then
+        return
+    end
+
+    inst:ListenForEvent("itemget", function(inst, data)
+        local item = data ~= nil and data.item or nil
+        if item ~= nil and SUNKEN_TREASURE_MARKER_ITEMS[item.prefab] then
+            inst._techlost_has_sunken_treasure = true
+        end
+    end)
+
+    inst:DoTaskInTime(0, function(inst)
+        if HasSunkenTreasureMarker(inst) then
+            inst._techlost_has_sunken_treasure = true
+        end
+    end)
+
+    if inst.components.workable ~= nil then
+        local old_onfinish = inst.components.workable.onfinish
+        inst.components.workable:SetOnFinishCallback(function(inst, worker, ...)
+            AddPirateTreasureAdvancedBlueprint(inst)
+            if old_onfinish ~= nil then
+                return old_onfinish(inst, worker, ...)
+            end
+        end)
     end
 end)
 

@@ -5,7 +5,7 @@ description = [[
 角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的配方可从风滚草获得蓝图。
 ]]
 author = "Codex"
-version = "2.9.5"
+version = "2.9.6"
 
 api_version = 10
 dst_compatible = true
@@ -73,6 +73,32 @@ configuration_options =
             { description = "开启", data = true },
         },
         default = false,
+    },
+    {
+        name = "sunken_treasure_advanced_blueprints",
+        label = "沉底宝箱高级蓝图",
+        hover = "开启后，沉底宝箱会按类型和奖励内容额外产出高级科技蓝图；稀有箱稳定给图，普通箱按概率给图。",
+        options =
+        {
+            { description = "关闭", data = 0 },
+            { description = "保守 10%", data = 0.10 },
+            { description = "推荐 20%", data = 0.20 },
+            { description = "慷慨 30%", data = 0.30 },
+        },
+        default = 0,
+    },
+    {
+        name = "pirate_treasure_advanced_blueprints",
+        label = "海盗宝藏高级蓝图",
+        hover = "开启后，含沉底宝箱内容的海盗宝藏必定额外给 1 张高级蓝图；普通海盗宝藏按配置概率给图。",
+        options =
+        {
+            { description = "关闭", data = 0 },
+            { description = "保守 10%", data = 0.10 },
+            { description = "推荐 20%", data = 0.20 },
+            { description = "慷慨 30%", data = 0.30 },
+        },
+        default = 0,
     },
     {
         name = "lose_tech_on_death",
