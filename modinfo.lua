@@ -2,7 +2,7 @@ name = "全科技蓝图解锁"
 description = [[
 符合条件的普通科技配方初始只能通过蓝图解锁。原生稀有蓝图保留 Boss、任务及商店等专属获取途径。
 
-角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的配方可从风滚草获得蓝图。
+角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的配方可从风滚草和海盗猴获得蓝图。
 ]]
 author = "Codex"
 version = "2.9.6"
@@ -110,6 +110,17 @@ configuration_options =
             { description = "关闭", data = false },
         },
         default = false,
+    },
+    {
+        name = "include_powder_monkey_blueprints",
+        label = "海盗猴蓝图掉落",
+        hover = "开启后，海盗猴死亡时会按风滚草蓝图概率掉落同一蓝图池的蓝图。",
+        options =
+        {
+            { description = "开启", data = true },
+            { description = "关闭", data = false },
+        },
+        default = true,
     },
     {
         name = "tumbleweed_blueprint_chance",

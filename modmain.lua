@@ -11,6 +11,8 @@ local include_skill_tree_recipes =
     GetModConfigData("include_skill_tree_recipes") == true
 local include_character_tag_recipes =
     GetModConfigData("include_character_tag_recipes") == true
+local include_powder_monkey_blueprints =
+    GetModConfigData("include_powder_monkey_blueprints") ~= false
 local lose_tech_on_death = GetModConfigData("lose_tech_on_death") == true
 local sunken_treasure_advanced_blueprint_chance =
     GetModConfigData("sunken_treasure_advanced_blueprints") or 0
@@ -1064,7 +1066,7 @@ AddPrefabPostInit("pirate_stash", function(inst)
     end
 end)
 
-local function DropTumbleweedBlueprint(inst)
+local function DropRandomBlueprint(inst)
     local candidates = GetTumbleweedBlueprintRecipes()
     if #candidates == 0 then
         return
@@ -1080,6 +1082,19 @@ local function DropTumbleweedBlueprint(inst)
     blueprint.Transform:SetPosition(inst.Transform:GetWorldPosition())
 end
 
+AddPrefabPostInit("powder_monkey", function(inst)
+    if not GLOBAL.TheWorld.ismastersim
+        or not include_powder_monkey_blueprints then
+        return
+    end
+
+    inst:ListenForEvent("death", function(inst)
+        if math.random() < tumbleweed_blueprint_chance then
+            DropRandomBlueprint(inst)
+        end
+    end)
+end)
+
 AddPrefabPostInit("tumbleweed", function(inst)
     if not GLOBAL.TheWorld.ismastersim
         or inst.components.pickable == nil then
@@ -1089,7 +1104,7 @@ AddPrefabPostInit("tumbleweed", function(inst)
     local old_onpickedfn = inst.components.pickable.onpickedfn
     inst.components.pickable.onpickedfn = function(inst, picker, ...)
         if math.random() < tumbleweed_blueprint_chance then
-            DropTumbleweedBlueprint(inst)
+            DropRandomBlueprint(inst)
         end
 
         if old_onpickedfn ~= nil then
