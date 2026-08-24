@@ -791,6 +791,75 @@ local function GetAdvancedBlueprintRecipes()
     return candidates
 end
 
+local function GetWorldRainWashCount()
+    return GLOBAL.TheWorld ~= nil
+        and GLOBAL.TheWorld._techlost_rain_wash_count
+        or 0
+end
+
+local function OnWorldRainChanged(world, israining)
+    if not israining then
+        world._techlost_was_raining = false
+        return
+    end
+
+    if world._techlost_was_raining then
+        return
+    end
+
+    world._techlost_was_raining = true
+    world._techlost_rain_wash_count =
+        (world._techlost_rain_wash_count or 0) + 1
+end
+
+local function InitWorldRainWashCounter(inst)
+    if inst._techlost_rain_wash_initialized then
+        return
+    end
+
+    inst._techlost_rain_wash_initialized = true
+
+    if not inst.ismastersim then
+        return
+    end
+
+    inst._techlost_rain_wash_count = inst._techlost_rain_wash_count or 0
+    inst._techlost_was_raining =
+        inst.state ~= nil
+        and inst.state.israining == true
+
+    inst:WatchWorldState("israining", OnWorldRainChanged)
+
+    local old_onsave = inst.OnSave
+    inst.OnSave = function(inst, data)
+        if old_onsave ~= nil then
+            old_onsave(inst, data)
+        end
+        if data ~= nil then
+            data.techlost_rain_wash_count =
+                inst._techlost_rain_wash_count or nil
+        end
+    end
+
+    local old_onload = inst.OnLoad
+    inst.OnLoad = function(inst, data)
+        if old_onload ~= nil then
+            old_onload(inst, data)
+        end
+        if data ~= nil then
+            inst._techlost_rain_wash_count =
+                data.techlost_rain_wash_count or 0
+        end
+        inst._techlost_was_raining =
+            inst.state ~= nil
+            and inst.state.israining == true
+    end
+end
+
+AddPrefabPostInit("world", InitWorldRainWashCounter)
+AddPrefabPostInit("forest", InitWorldRainWashCounter)
+AddPrefabPostInit("cave", InitWorldRainWashCounter)
+
 local function ConfigureBlueprint(blueprint, recipe)
     if blueprint == nil or recipe == nil or blueprint.components.teacher == nil then
         return false
@@ -807,6 +876,7 @@ local function ConfigureBlueprint(blueprint, recipe)
 
     if IsBlueprintPoolRecipe(recipe) then
         blueprint._techlost_blueprint_pool_generated = true
+        blueprint._techlost_last_rain_wash_count = GetWorldRainWashCount()
     end
 
     return true
@@ -1007,14 +1077,28 @@ local function IsGroundBlueprint(blueprint)
         and not blueprint.is_rare
 end
 
-local function WashGroundBlueprint(blueprint)
+local function ReconcileBlueprintRainWashes(blueprint)
     if ground_blueprint_rain_washes <= 0
+        or blueprint == nil
+        or blueprint.is_rare
+        or not blueprint._techlost_blueprint_pool_generated then
+        return
+    end
+
+    local current_rain_wash_count = GetWorldRainWashCount()
+    local last_rain_wash_count = blueprint._techlost_last_rain_wash_count
+    blueprint._techlost_last_rain_wash_count = current_rain_wash_count
+
+    if last_rain_wash_count == nil
+        or current_rain_wash_count <= last_rain_wash_count
         or not IsGroundBlueprint(blueprint) then
         return
     end
 
     blueprint._techlost_rain_washes =
-        (blueprint._techlost_rain_washes or 0) + 1
+        (blueprint._techlost_rain_washes or 0)
+        + current_rain_wash_count
+        - last_rain_wash_count
 
     if blueprint._techlost_rain_washes >= ground_blueprint_rain_washes then
         blueprint:Remove()
@@ -1035,7 +1119,7 @@ local function OnBlueprintRainChanged(blueprint, israining)
     end
 
     blueprint._techlost_was_raining = true
-    WashGroundBlueprint(blueprint)
+    blueprint:DoTaskInTime(0, ReconcileBlueprintRainWashes)
 end
 
 -- Vanilla random blueprints exclude TECH.LOST but do not exclude builder_skill.
@@ -1064,6 +1148,8 @@ AddPrefabPostInit("blueprint", function(inst)
             data.techlost_rain_washes = inst._techlost_rain_washes or nil
             data.techlost_blueprint_pool_generated =
                 inst._techlost_blueprint_pool_generated or nil
+            data.techlost_last_rain_wash_count =
+                inst._techlost_last_rain_wash_count or nil
         end
     end
 
@@ -1076,8 +1162,11 @@ AddPrefabPostInit("blueprint", function(inst)
             inst._techlost_rain_washes = data.techlost_rain_washes or nil
             inst._techlost_blueprint_pool_generated =
                 data.techlost_blueprint_pool_generated or nil
+            inst._techlost_last_rain_wash_count =
+                data.techlost_last_rain_wash_count or nil
         end
         RepairInvalidBlueprint(inst)
+        inst:DoTaskInTime(0, ReconcileBlueprintRainWashes)
     end
 end)
 
