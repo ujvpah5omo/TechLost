@@ -14,6 +14,8 @@ local include_character_tag_recipes =
 local include_powder_monkey_blueprints =
     GetModConfigData("include_powder_monkey_blueprints") ~= false
 local lose_tech_on_death = GetModConfigData("lose_tech_on_death") == true
+local ground_blueprint_rain_washes =
+    GetModConfigData("ground_blueprint_rain_washes") or 3
 local sunken_treasure_advanced_blueprint_chance =
     GetModConfigData("sunken_treasure_advanced_blueprints") or 0
 local pirate_treasure_advanced_blueprint_chance =
@@ -803,6 +805,10 @@ local function ConfigureBlueprint(blueprint, recipe)
         blueprint.components.named:SetName(product_name .. " " .. blueprint_name)
     end
 
+    if IsBlueprintPoolRecipe(recipe) then
+        blueprint._techlost_blueprint_pool_generated = true
+    end
+
     return true
 end
 
@@ -991,6 +997,47 @@ local function RepairInvalidBlueprint(blueprint)
     ConfigureBlueprint(blueprint, recipe)
 end
 
+local function IsGroundBlueprint(blueprint)
+    return blueprint ~= nil
+        and blueprint._techlost_blueprint_pool_generated
+        and blueprint.components ~= nil
+        and blueprint.components.inventoryitem ~= nil
+        and blueprint.components.inventoryitem.owner == nil
+        and not blueprint:HasTag("INLIMBO")
+        and not blueprint.is_rare
+end
+
+local function WashGroundBlueprint(blueprint)
+    if ground_blueprint_rain_washes <= 0
+        or not IsGroundBlueprint(blueprint) then
+        return
+    end
+
+    blueprint._techlost_rain_washes =
+        (blueprint._techlost_rain_washes or 0) + 1
+
+    if blueprint._techlost_rain_washes >= ground_blueprint_rain_washes then
+        blueprint:Remove()
+    end
+end
+
+local function OnBlueprintRainChanged(blueprint, israining)
+    if not israining then
+        blueprint._techlost_was_raining = false
+        return
+    end
+
+    -- WatchWorldState may fire immediately when registered. Track the current
+    -- rain state so newly spawned or loaded blueprints are only counted by the
+    -- next real rain start.
+    if blueprint._techlost_was_raining then
+        return
+    end
+
+    blueprint._techlost_was_raining = true
+    WashGroundBlueprint(blueprint)
+end
+
 -- Vanilla random blueprints exclude TECH.LOST but do not exclude builder_skill.
 -- Replace unknown or configuration-excluded results with our filtered pool.
 AddPrefabPostInit("blueprint", function(inst)
@@ -1000,10 +1047,35 @@ AddPrefabPostInit("blueprint", function(inst)
 
     RepairInvalidBlueprint(inst)
 
+    if ground_blueprint_rain_washes > 0 and not inst.is_rare then
+        inst._techlost_was_raining =
+            GLOBAL.TheWorld ~= nil
+            and GLOBAL.TheWorld.state ~= nil
+            and GLOBAL.TheWorld.state.israining == true
+        inst:WatchWorldState("israining", OnBlueprintRainChanged)
+    end
+
+    local old_onsave = inst.OnSave
+    inst.OnSave = function(inst, data)
+        if old_onsave ~= nil then
+            old_onsave(inst, data)
+        end
+        if data ~= nil then
+            data.techlost_rain_washes = inst._techlost_rain_washes or nil
+            data.techlost_blueprint_pool_generated =
+                inst._techlost_blueprint_pool_generated or nil
+        end
+    end
+
     local old_onload = inst.OnLoad
     inst.OnLoad = function(inst, data)
         if old_onload ~= nil then
             old_onload(inst, data)
+        end
+        if data ~= nil then
+            inst._techlost_rain_washes = data.techlost_rain_washes or nil
+            inst._techlost_blueprint_pool_generated =
+                data.techlost_blueprint_pool_generated or nil
         end
         RepairInvalidBlueprint(inst)
     end
