@@ -1,6 +1,9 @@
 local GLOBAL = GLOBAL
 
 local BLUEPRINT_ONLY_TECH = (GLOBAL.TECH and GLOBAL.TECH.LOST) or { LOST = 1 }
+local skilltree_defs = GLOBAL.require ~= nil
+    and GLOBAL.require("prefabs/skilltree_defs")
+    or nil
 local include_ancient_tech = GetModConfigData("include_ancient_tech") == true
 local include_lunar_forge_tech = GetModConfigData("include_lunar_forge_tech") == true
 local include_shadow_forge_tech = GetModConfigData("include_shadow_forge_tech") == true
@@ -79,23 +82,87 @@ local function IsShadowForgeTechnology(level)
         and level.SHADOWFORGING < 10
 end
 
-local function IsRiftTechnologyAvailableForBlueprintPool(level)
-    local riftspawner = GLOBAL.TheWorld ~= nil
+local function GetRiftSpawner()
+    return GLOBAL.TheWorld ~= nil
         and GLOBAL.TheWorld.components ~= nil
         and GLOBAL.TheWorld.components.riftspawner
         or nil
+end
 
+local function IsLunarRiftEnabled()
+    local riftspawner = GetRiftSpawner()
+    return riftspawner ~= nil
+        and riftspawner.GetLunarRiftsEnabled ~= nil
+        and riftspawner:GetLunarRiftsEnabled()
+end
+
+local function IsShadowRiftEnabled()
+    local riftspawner = GetRiftSpawner()
+    return riftspawner ~= nil
+        and riftspawner.GetShadowRiftsEnabled ~= nil
+        and riftspawner:GetShadowRiftsEnabled()
+end
+
+local function IsForgeTechnologyAvailableForBlueprintPool(level)
     if IsLunarForgeTechnology(level) then
-        return riftspawner ~= nil
-            and riftspawner.GetLunarRiftsEnabled ~= nil
-            and riftspawner:GetLunarRiftsEnabled()
+        return IsLunarRiftEnabled()
     elseif IsShadowForgeTechnology(level) then
-        return riftspawner ~= nil
-            and riftspawner.GetShadowRiftsEnabled ~= nil
-            and riftspawner:GetShadowRiftsEnabled()
+        return IsShadowRiftEnabled()
     end
 
     return true
+end
+
+local function SkillHasTag(skill, tag)
+    if type(skill) ~= "string"
+        or skilltree_defs == nil
+        or skilltree_defs.SKILLTREE_DEFS == nil then
+        return false
+    end
+
+    for _, skills in pairs(skilltree_defs.SKILLTREE_DEFS) do
+        local skill_data = skills[skill]
+        if skill_data ~= nil and skill_data.tags ~= nil then
+            for _, skill_tag in ipairs(skill_data.tags) do
+                if skill_tag == tag then
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
+end
+
+local function IsLunarSkillTreeRecipe(recipe)
+    return recipe ~= nil
+        and type(recipe.builder_skill) == "string"
+        and (SkillHasTag(recipe.builder_skill, "lunar_favor")
+            or SkillHasTag(recipe.builder_skill, "lunar")
+            or string.find(recipe.builder_skill, "lunar", 1, true) ~= nil)
+end
+
+local function IsShadowSkillTreeRecipe(recipe)
+    return recipe ~= nil
+        and type(recipe.builder_skill) == "string"
+        and (SkillHasTag(recipe.builder_skill, "shadow_favor")
+            or SkillHasTag(recipe.builder_skill, "shadow")
+            or string.find(recipe.builder_skill, "shadow", 1, true) ~= nil)
+end
+
+local function IsSkillTreeRecipeAvailableForBlueprintPool(recipe)
+    if IsLunarSkillTreeRecipe(recipe) then
+        return IsLunarRiftEnabled()
+    elseif IsShadowSkillTreeRecipe(recipe) then
+        return IsShadowRiftEnabled()
+    end
+
+    return true
+end
+
+local function IsRiftTechnologyAvailableForBlueprintPool(recipe, level)
+    return IsForgeTechnologyAvailableForBlueprintPool(level)
+        and IsSkillTreeRecipeAvailableForBlueprintPool(recipe)
 end
 
 local function IsInactiveSpecialEventTechnology(level)
@@ -554,7 +621,7 @@ local function IsBlueprintPoolRecipe(recipe)
         or recipe.level
     return IsBlueprintCompatible(recipe, original_level)
         and RequiresBlueprintLearning(recipe, original_level)
-        and IsRiftTechnologyAvailableForBlueprintPool(original_level)
+        and IsRiftTechnologyAvailableForBlueprintPool(recipe, original_level)
 end
 
 local function GetTumbleweedBlueprintRecipes()

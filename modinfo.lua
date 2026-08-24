@@ -5,7 +5,7 @@ description = [[
 角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的配方可从风滚草获得蓝图。
 ]]
 author = "Codex"
-version = "2.9.3"
+version = "2.9.4"
 
 api_version = 10
 dst_compatible = true
@@ -22,7 +22,7 @@ configuration_options =
     {
         name = "include_skill_tree_recipes",
         label = "技能树配方蓝图",
-        hover = "开启后，受技能树限制的可制作配方会进入蓝图池；仍需激活对应技能才能学习和制作。",
+        hover = "开启后，受技能树限制的可制作配方会进入蓝图池；月亮/暗影线技能蓝图需要对应裂隙开启。",
         options =
         {
             { description = "关闭", data = false },
