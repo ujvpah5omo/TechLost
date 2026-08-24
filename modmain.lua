@@ -65,6 +65,39 @@ local function GetOptionalStationTechnologyEnabled(level)
     return nil
 end
 
+local function IsLunarForgeTechnology(level)
+    return level ~= nil
+        and type(level.LUNARFORGING) == "number"
+        and level.LUNARFORGING > 0
+        and level.LUNARFORGING < 10
+end
+
+local function IsShadowForgeTechnology(level)
+    return level ~= nil
+        and type(level.SHADOWFORGING) == "number"
+        and level.SHADOWFORGING > 0
+        and level.SHADOWFORGING < 10
+end
+
+local function IsRiftTechnologyAvailableForBlueprintPool(level)
+    local riftspawner = GLOBAL.TheWorld ~= nil
+        and GLOBAL.TheWorld.components ~= nil
+        and GLOBAL.TheWorld.components.riftspawner
+        or nil
+
+    if IsLunarForgeTechnology(level) then
+        return riftspawner ~= nil
+            and riftspawner.GetLunarRiftsEnabled ~= nil
+            and riftspawner:GetLunarRiftsEnabled()
+    elseif IsShadowForgeTechnology(level) then
+        return riftspawner ~= nil
+            and riftspawner.GetShadowRiftsEnabled ~= nil
+            and riftspawner:GetShadowRiftsEnabled()
+    end
+
+    return true
+end
+
 local function IsInactiveSpecialEventTechnology(level)
     if level == nil
         or GLOBAL.SPECIAL_EVENTS == nil
@@ -521,6 +554,7 @@ local function IsBlueprintPoolRecipe(recipe)
         or recipe.level
     return IsBlueprintCompatible(recipe, original_level)
         and RequiresBlueprintLearning(recipe, original_level)
+        and IsRiftTechnologyAvailableForBlueprintPool(original_level)
 end
 
 local function GetTumbleweedBlueprintRecipes()
