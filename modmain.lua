@@ -26,6 +26,7 @@ local pirate_treasure_advanced_blueprint_chance =
     GetModConfigData("pirate_treasure_advanced_blueprints") or 0
 
 local SKILL_TREE_BLUEPRINT_REQUIRED_MESSAGE = "需要先学习该技能蓝图"
+local SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE = "未学习蓝图的技能已被取消"
 
 local CHARACTER_RECIPE_TAG_OWNERS = {
     pyromaniac = "willow",
@@ -814,8 +815,6 @@ local function IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
         and IsSelectableCharacter(character)
         and skill_data.rpc_id ~= nil
         and skill_data.infographic == nil
-        and skill_data.lock_open == nil
-        and IsSkillTreeNodeAvailableForBlueprintPool(character, skill, skill_data)
 end
 
 local function IsSkillTreeNodeBlueprintUnlocked(updater, character, skill)
@@ -824,19 +823,34 @@ local function IsSkillTreeNodeBlueprintUnlocked(updater, character, skill)
         and updater._techlost_blueprint_skill_unlocks[character][skill] == true
 end
 
-local function SaySkillTreeBlueprintRequired(inst)
+local function SayWithCooldown(inst, message, cooldown_key)
     if inst ~= nil
         and inst.components ~= nil
         and inst.components.talker ~= nil then
         local now = GLOBAL.GetTime ~= nil and GLOBAL.GetTime() or 0
-        if inst._techlost_last_skill_blueprint_hint_time ~= nil
-            and now - inst._techlost_last_skill_blueprint_hint_time < 2 then
+        if inst[cooldown_key] ~= nil and now - inst[cooldown_key] < 2 then
             return
         end
 
-        inst._techlost_last_skill_blueprint_hint_time = now
-        inst.components.talker:Say(SKILL_TREE_BLUEPRINT_REQUIRED_MESSAGE)
+        inst[cooldown_key] = now
+        inst.components.talker:Say(message)
     end
+end
+
+local function SaySkillTreeBlueprintRequired(inst)
+    SayWithCooldown(
+        inst,
+        SKILL_TREE_BLUEPRINT_REQUIRED_MESSAGE,
+        "_techlost_last_skill_blueprint_hint_time"
+    )
+end
+
+local function SayUnauthorizedSkillTreeNodesRemoved(inst)
+    SayWithCooldown(
+        inst,
+        SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE,
+        "_techlost_last_skill_blueprint_removed_time"
+    )
 end
 
 local function CanLearnSkillTreeBlueprint(target, character, skill)
@@ -846,7 +860,12 @@ local function CanLearnSkillTreeBlueprint(target, character, skill)
         or target.prefab ~= character
         or skill_data == nil
         or not updater:IsValidSkill(skill)
-        or not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
+        or not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
+        or not IsSkillTreeNodeAvailableForBlueprintPool(
+            character,
+            skill,
+            skill_data
+        ) then
         return false, "CANTLEARN"
     end
 
@@ -1031,23 +1050,14 @@ end
 local function IsSkillTreeNodeActivationAllowed(
     updater,
     character,
-    skill,
-    previously_activated_skills
+    skill
 )
     local skill_data = GetSkillData(character, skill)
     if not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
         return true
     end
 
-    if IsSkillTreeNodeBlueprintUnlocked(updater, character, skill) then
-        return true
-    end
-
-    -- Keep old saves gentle: a skill that was already active before this
-    -- feature was enabled is not forcibly stripped, but newly activating it
-    -- still requires its blueprint first.
-    return previously_activated_skills ~= nil
-        and previously_activated_skills[skill] == true
+    return IsSkillTreeNodeBlueprintUnlocked(updater, character, skill)
 end
 
 local function GetBlockedSkillTreeNodeActivation(
@@ -1059,17 +1069,11 @@ local function GetBlockedSkillTreeNodeActivation(
         return nil
     end
 
-    local previously_activated_skills =
-        updater.GetActivatedSkills ~= nil
-        and updater:GetActivatedSkills()
-        or nil
-
     for skill in pairs(activated_skills) do
         if not IsSkillTreeNodeActivationAllowed(
             updater,
             character,
-            skill,
-            previously_activated_skills
+            skill
         ) then
             return skill
         end
@@ -1088,26 +1092,29 @@ local function ValidateCharacterDataWithBlueprintSkillUnlocks(
         character,
         activated_skills
     ) ~= nil then
-        SaySkillTreeBlueprintRequired(updater.inst)
+        if not updater._techlost_suppress_skill_blueprint_hint then
+            SaySkillTreeBlueprintRequired(updater.inst)
+        end
         return false
     end
 
     return true
 end
 
-local function SeedActivatedSkillsAsBlueprintUnlocks(updater)
+local function RemoveUnauthorizedSkillTreeNodeActivations(updater)
     if not include_skill_tree_node_blueprints
         or updater == nil
         or updater.GetActivatedSkills == nil then
-        return
+        return false
     end
 
     local character = updater.inst.prefab
     local activated_skills = updater:GetActivatedSkills()
     if activated_skills == nil then
-        return
+        return false
     end
 
+    local removed_skills = {}
     for skill in pairs(activated_skills) do
         local skill_data = GetSkillData(character, skill)
         if IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
@@ -1116,9 +1123,45 @@ local function SeedActivatedSkillsAsBlueprintUnlocks(updater)
                 character,
                 skill
             ) then
-            RememberBlueprintSkillUnlock(updater, character, skill)
+            removed_skills[#removed_skills + 1] = skill
         end
     end
+
+    if #removed_skills <= 0 then
+        return false
+    end
+
+    for _, skill in ipairs(removed_skills) do
+        if updater.DeactivateSkill ~= nil then
+            updater._techlost_suppress_skill_blueprint_hint = true
+            updater:DeactivateSkill(skill)
+            updater._techlost_suppress_skill_blueprint_hint = nil
+        end
+
+        local character_skills = updater.skilltree ~= nil
+            and updater.skilltree.activatedskills ~= nil
+            and updater.skilltree.activatedskills[character]
+            or nil
+        if character_skills ~= nil then
+            character_skills[skill] = nil
+        end
+    end
+
+    SayUnauthorizedSkillTreeNodesRemoved(updater.inst)
+    return true
+end
+
+local function DoStrictSkillTreeBlueprintCheck(updater)
+    if updater == nil or updater.inst == nil then
+        return
+    end
+
+    updater.inst:DoTaskInTime(0, function()
+        if updater.inst.components ~= nil
+            and updater.inst.components.skilltreeupdater == updater then
+            RemoveUnauthorizedSkillTreeNodeActivations(updater)
+        end
+    end)
 end
 
 AddComponentPostInit("skilltreeupdater", function(self)
@@ -1148,14 +1191,10 @@ AddComponentPostInit("skilltreeupdater", function(self)
     local old_activate_skill = self.ActivateSkill
     self.ActivateSkill = function(self, skill, ...)
         local character = self.inst.prefab
-        local activated_skills = self.GetActivatedSkills ~= nil
-            and self:GetActivatedSkills()
-            or nil
         if not IsSkillTreeNodeActivationAllowed(
             self,
             character,
-            skill,
-            activated_skills
+            skill
         ) then
             SaySkillTreeBlueprintRequired(self.inst)
             return false
@@ -1191,15 +1230,7 @@ AddComponentPostInit("skilltreeupdater", function(self)
             )
             or nil
 
-        -- Convert already-active skills in existing saves into permissions,
-        -- so enabling this option mid-save does not invalidate the current
-        -- skill build.
-        self.inst:DoTaskInTime(0, function()
-            if self.inst.components ~= nil
-                and self.inst.components.skilltreeupdater == self then
-                SeedActivatedSkillsAsBlueprintUnlocks(self)
-            end
-        end)
+        DoStrictSkillTreeBlueprintCheck(self)
     end
 
     local old_transfer_component = self.TransferComponent
@@ -1215,7 +1246,7 @@ AddComponentPostInit("skilltreeupdater", function(self)
                 CopyBlueprintSkillUnlocks(
                     self._techlost_blueprint_skill_unlocks
                 )
-            SeedActivatedSkillsAsBlueprintUnlocks(new_updater)
+            DoStrictSkillTreeBlueprintCheck(new_updater)
         end
     end
 end)
@@ -1303,15 +1334,8 @@ local function GetAdvancedBlueprintRecipes()
 end
 
 local function IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data)
-    return include_skill_tree_node_blueprints
-        and type(character) == "string"
-        and type(skill) == "string"
-        and type(skill_data) == "table"
-        and IsSelectableCharacter(character)
+    return IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
         and IsCharacterAllowedForBlueprintPool(character)
-        and skill_data.rpc_id ~= nil
-        and skill_data.infographic == nil
-        and skill_data.lock_open == nil
         and IsSkillTreeNodeAvailableForBlueprintPool(character, skill, skill_data)
 end
 
@@ -1419,6 +1443,12 @@ if AddPlayerPostInit ~= nil then
     AddPlayerPostInit(function(inst)
         if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
             inst:DoTaskInTime(0, MarkJoinedCharacterForBlueprintPool)
+            if inst.components ~= nil
+                and inst.components.skilltreeupdater ~= nil then
+                DoStrictSkillTreeBlueprintCheck(
+                    inst.components.skilltreeupdater
+                )
+            end
         end
     end)
 end
