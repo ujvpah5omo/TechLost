@@ -9,6 +9,8 @@ local include_lunar_forge_tech = GetModConfigData("include_lunar_forge_tech") ==
 local include_shadow_forge_tech = GetModConfigData("include_shadow_forge_tech") == true
 local include_skill_tree_recipes =
     GetModConfigData("include_skill_tree_recipes") == true
+local include_skill_tree_node_blueprints =
+    GetModConfigData("include_skill_tree_node_blueprints") == true
 local include_character_tag_recipes =
     GetModConfigData("include_character_tag_recipes") == true
 local include_powder_monkey_blueprints =
@@ -144,6 +146,63 @@ local function IsSelectableCharacter(character)
             and table.contains(GLOBAL.MODCHARACTERLIST, character))
 end
 
+local function IsCharacterActiveForBlueprintPool(character)
+    if type(character) ~= "string" or GLOBAL.AllPlayers == nil then
+        return false
+    end
+
+    for _, player in ipairs(GLOBAL.AllPlayers) do
+        if player ~= nil and player.prefab == character then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function GetSkillOwnerCharacter(skill)
+    local skill_defs = skilltree_defs ~= nil
+        and skilltree_defs.SKILLTREE_DEFS
+        or nil
+    if type(skill) ~= "string" or skill_defs == nil then
+        return nil
+    end
+
+    for character, skills in pairs(skill_defs) do
+        if type(skills) == "table"
+            and skills[skill] ~= nil
+            and IsSelectableCharacter(character) then
+            return character
+        end
+    end
+
+    return nil
+end
+
+local function GetRecipeOwnerCharacter(recipe)
+    if recipe == nil then
+        return nil
+    end
+
+    if recipe.builder_tag ~= nil then
+        local character = CHARACTER_RECIPE_TAG_OWNERS[recipe.builder_tag]
+        if character ~= nil then
+            return character
+        end
+    end
+
+    if recipe.builder_skill ~= nil then
+        return GetSkillOwnerCharacter(recipe.builder_skill)
+    end
+
+    return nil
+end
+
+local function IsRecipeActiveForBlueprintPool(recipe)
+    local character = GetRecipeOwnerCharacter(recipe)
+    return character == nil or IsCharacterActiveForBlueprintPool(character)
+end
+
 local function IsCharacterTagRecipeEnabled(recipe, level)
     if not include_character_tag_recipes
         or recipe == nil
@@ -247,6 +306,34 @@ local function SkillHasTag(skill, tag)
     return false
 end
 
+local function SkillDataHasTag(skill_data, tag)
+    if skill_data == nil or skill_data.tags == nil then
+        return false
+    end
+
+    for _, skill_tag in ipairs(skill_data.tags) do
+        if skill_tag == tag then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function IsLunarSkill(character, skill, skill_data)
+    return type(skill) == "string"
+        and (SkillDataHasTag(skill_data, "lunar_favor")
+            or SkillDataHasTag(skill_data, "lunar")
+            or string.find(skill, "lunar", 1, true) ~= nil)
+end
+
+local function IsShadowSkill(character, skill, skill_data)
+    return type(skill) == "string"
+        and (SkillDataHasTag(skill_data, "shadow_favor")
+            or SkillDataHasTag(skill_data, "shadow")
+            or string.find(skill, "shadow", 1, true) ~= nil)
+end
+
 local function IsLunarSkillTreeRecipe(recipe)
     return recipe ~= nil
         and type(recipe.builder_skill) == "string"
@@ -267,6 +354,16 @@ local function IsSkillTreeRecipeAvailableForBlueprintPool(recipe)
     if IsLunarSkillTreeRecipe(recipe) then
         return IsLunarRiftEnabled()
     elseif IsShadowSkillTreeRecipe(recipe) then
+        return IsShadowRiftEnabled()
+    end
+
+    return true
+end
+
+local function IsSkillTreeNodeAvailableForBlueprintPool(character, skill, skill_data)
+    if IsLunarSkill(character, skill, skill_data) then
+        return IsLunarRiftEnabled()
+    elseif IsShadowSkill(character, skill, skill_data) then
         return IsShadowRiftEnabled()
     end
 
@@ -618,6 +715,164 @@ local function LoseLearnedRecipes(builder)
     ApplyStationUnlockedRecipes(builder)
 end
 
+local function GetSkillTreeUpdater(target)
+    return target ~= nil
+        and target.components ~= nil
+        and target.components.skilltreeupdater
+        or nil
+end
+
+local function GetSkillData(character, skill)
+    return skilltree_defs ~= nil
+        and skilltree_defs.SKILLTREE_DEFS ~= nil
+        and skilltree_defs.SKILLTREE_DEFS[character] ~= nil
+        and skilltree_defs.SKILLTREE_DEFS[character][skill]
+        or nil
+end
+
+local function SkillPrerequisiteUnlocked(character, activated_skills, skill_name)
+    local skill_data = GetSkillData(character, skill_name)
+    if skill_data == nil then
+        return false
+    end
+
+    return activated_skills[skill_name] ~= nil
+        or (skill_data.lock_open ~= nil
+            and skill_data.lock_open(character, activated_skills, true))
+end
+
+local function SkillPrerequisiteEntryUnlocked(
+    character,
+    activated_skills,
+    key,
+    value
+)
+    local skill_name = type(value) == "string" and value or key
+    return type(skill_name) == "string"
+        and SkillPrerequisiteUnlocked(character, activated_skills, skill_name)
+end
+
+local function SkillTreeNodePrerequisitesMet(character, skill, skill_data, activated_skills)
+    activated_skills = activated_skills or {}
+
+    if skill_data.must_have_one_of ~= nil then
+        local has_one_of = false
+        for key, value in pairs(skill_data.must_have_one_of) do
+            if SkillPrerequisiteEntryUnlocked(
+                character,
+                activated_skills,
+                key,
+                value
+            ) then
+                has_one_of = true
+                break
+            end
+        end
+        if not has_one_of then
+            return false
+        end
+    end
+
+    if skill_data.must_have_all_of ~= nil then
+        for key, value in pairs(skill_data.must_have_all_of) do
+            if not SkillPrerequisiteEntryUnlocked(
+                character,
+                activated_skills,
+                key,
+                value
+            ) then
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
+local function CanLearnSkillTreeBlueprint(target, character, skill)
+    local updater = GetSkillTreeUpdater(target)
+    local skill_data = GetSkillData(character, skill)
+    if updater == nil
+        or target.prefab ~= character
+        or skill_data == nil
+        or not updater:IsValidSkill(skill)
+        or skill_data.rpc_id == nil
+        or skill_data.infographic ~= nil
+        or skill_data.lock_open ~= nil then
+        return false, "CANTLEARN"
+    end
+
+    if updater:IsActivated(skill) then
+        return false, "KNOWN"
+    end
+
+    if not IsSkillTreeNodeAvailableForBlueprintPool(character, skill, skill_data)
+        or not SkillTreeNodePrerequisitesMet(
+            character,
+            skill,
+            skill_data,
+            updater:GetActivatedSkills() or {}
+        ) then
+        return false, "CANTLEARN"
+    end
+
+    return true
+end
+
+local function RememberBlueprintSkill(updater, character, skill)
+    updater._techlost_blueprint_skills =
+        updater._techlost_blueprint_skills or {}
+    updater._techlost_blueprint_skills[character] =
+        updater._techlost_blueprint_skills[character] or {}
+    updater._techlost_blueprint_skills[character][skill] = true
+end
+
+local function ForgetBlueprintSkill(updater, character, skill)
+    local character_skills = updater._techlost_blueprint_skills ~= nil
+        and updater._techlost_blueprint_skills[character]
+        or nil
+    if character_skills == nil then
+        return
+    end
+
+    character_skills[skill] = nil
+    if next(character_skills) == nil then
+        updater._techlost_blueprint_skills[character] = nil
+    end
+end
+
+local function ActivateSkillIgnoringPointCost(updater, skill)
+    local old_skip_validation = updater.skilltree ~= nil
+        and updater.skilltree.skip_validation
+        or nil
+
+    updater:SetSkipValidation(true)
+    updater:ActivateSkill(skill)
+
+    if updater.skilltree ~= nil then
+        updater.skilltree.skip_validation = old_skip_validation and true or nil
+    else
+        updater:SetSkipValidation(false)
+    end
+end
+
+local function ActivateSkillFromBlueprint(target, character, skill)
+    local can_learn, reason = CanLearnSkillTreeBlueprint(target, character, skill)
+    if not can_learn then
+        return false, reason
+    end
+
+    local updater = target.components.skilltreeupdater
+    ActivateSkillIgnoringPointCost(updater, skill)
+
+    if updater:IsActivated(skill) then
+        RememberBlueprintSkill(updater, character, skill)
+        return true
+    end
+
+    return false, "CANTLEARN"
+end
+
 AddComponentPostInit("prototyper", function(self)
     if GLOBAL.TheWorld ~= nil
         and GLOBAL.TheWorld.ismastersim
@@ -629,6 +884,18 @@ end)
 AddComponentPostInit("teacher", function(self)
     local old_teach = self.Teach
     self.Teach = function(self, target, ...)
+        if self.inst ~= nil and self.inst._techlost_skill_blueprint then
+            local success, reason = ActivateSkillFromBlueprint(
+                target,
+                self.inst._techlost_skill_blueprint_character,
+                self.inst._techlost_skill_blueprint_skill
+            )
+            if success then
+                self.inst:Remove()
+            end
+            return success, reason
+        end
+
         local recipe = self.recipe ~= nil and GLOBAL.AllRecipes[self.recipe] or nil
         local builder = target ~= nil
             and target.components ~= nil
@@ -713,6 +980,271 @@ AddComponentPostInit("builder", function(self)
     end
 end)
 
+local function CopyBlueprintSkills(blueprint_skills)
+    if type(blueprint_skills) ~= "table" then
+        return nil
+    end
+
+    local copy = {}
+    for character, skills in pairs(blueprint_skills) do
+        if type(skills) == "table" then
+            for skill in pairs(skills) do
+                copy[character] = copy[character] or {}
+                copy[character][skill] = true
+            end
+        end
+    end
+
+    return next(copy) ~= nil and copy or nil
+end
+
+local function TemporarilyRemoveBlueprintSkills(updater, character)
+    local character_skills = updater._techlost_blueprint_skills ~= nil
+        and updater._techlost_blueprint_skills[character]
+        or nil
+    local activated_skills = updater.skilltree ~= nil
+        and updater.skilltree.activatedskills ~= nil
+        and updater.skilltree.activatedskills[character]
+        or nil
+    if character_skills == nil or activated_skills == nil then
+        return nil
+    end
+
+    local removed = {}
+    for skill in pairs(character_skills) do
+        if activated_skills[skill] then
+            removed[skill] = true
+            activated_skills[skill] = nil
+        end
+    end
+
+    return next(removed) ~= nil and removed or nil
+end
+
+local function RestoreTemporarilyRemovedSkills(updater, character, removed)
+    local activated_skills = updater.skilltree ~= nil
+        and updater.skilltree.activatedskills ~= nil
+        and updater.skilltree.activatedskills[character]
+        or nil
+    if removed == nil or activated_skills == nil then
+        return
+    end
+
+    for skill in pairs(removed) do
+        activated_skills[skill] = true
+    end
+end
+
+local function ApplyBlueprintSkills(updater)
+    local character = updater.inst.prefab
+    local character_skills = updater._techlost_blueprint_skills ~= nil
+        and updater._techlost_blueprint_skills[character]
+        or nil
+    if character_skills == nil then
+        return
+    end
+
+    local changed = true
+    while changed do
+        changed = false
+        for skill in pairs(character_skills) do
+            if not updater:IsActivated(skill) then
+                local can_learn = CanLearnSkillTreeBlueprint(
+                    updater.inst,
+                    character,
+                    skill
+                )
+                if can_learn then
+                    ActivateSkillIgnoringPointCost(updater, skill)
+                    if updater:IsActivated(skill) then
+                        changed = true
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function IsBlueprintSkill(updater, character, skill)
+    return updater._techlost_blueprint_skills ~= nil
+        and updater._techlost_blueprint_skills[character] ~= nil
+        and updater._techlost_blueprint_skills[character][skill] == true
+end
+
+local function CountActivatedBlueprintSkills(updater, character, activated_skills)
+    if activated_skills == nil then
+        return 0
+    end
+
+    local count = 0
+    for skill in pairs(activated_skills) do
+        if IsBlueprintSkill(updater, character, skill) then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+local function ValidateCharacterDataWithBlueprintSkills(
+    updater,
+    skilltree,
+    old_validate_character_data,
+    character,
+    activated_skills,
+    skill_xp,
+    ...
+)
+    if old_validate_character_data == nil
+        or skilltree == nil
+        or activated_skills == nil
+        or skilltree.GetPointsForSkillXP == nil then
+        return false
+    end
+
+    local blueprint_skill_count =
+        CountActivatedBlueprintSkills(updater, character, activated_skills)
+    if blueprint_skill_count <= 0 then
+        return false
+    end
+
+    local old_get_points_for_skill_xp = skilltree.GetPointsForSkillXP
+    skilltree.GetPointsForSkillXP = function(skilltree, ...)
+        local points = old_get_points_for_skill_xp(skilltree, ...)
+        if type(points) == "number" then
+            return points + blueprint_skill_count
+        end
+        return points
+    end
+
+    local result = old_validate_character_data(
+        skilltree,
+        character,
+        activated_skills,
+        skill_xp,
+        ...
+    )
+    skilltree.GetPointsForSkillXP = old_get_points_for_skill_xp
+
+    return result
+end
+
+AddComponentPostInit("skilltreeupdater", function(self)
+    if self.skilltree ~= nil then
+        local old_validate_character_data = self.skilltree.ValidateCharacterData
+        self.skilltree.ValidateCharacterData = function(skilltree, character, activated_skills, skill_xp, ...)
+            if ValidateCharacterDataWithBlueprintSkills(
+                self,
+                skilltree,
+                old_validate_character_data,
+                character,
+                activated_skills,
+                skill_xp,
+                ...
+            ) then
+                return true
+            end
+
+            return old_validate_character_data ~= nil
+                and old_validate_character_data(
+                    skilltree,
+                    character,
+                    activated_skills,
+                    skill_xp,
+                    ...
+                )
+                or false
+        end
+    end
+
+    local old_get_available_skill_points = self.GetAvailableSkillPoints
+    self.GetAvailableSkillPoints = function(self, ...)
+        local points = old_get_available_skill_points ~= nil
+            and old_get_available_skill_points(self, ...)
+            or nil
+        if type(points) ~= "number" then
+            return points
+        end
+
+        return points + CountActivatedBlueprintSkills(
+            self,
+            self.inst.prefab,
+            self:GetActivatedSkills()
+        )
+    end
+
+    local old_onsave = self.OnSave
+    self.OnSave = function(self, ...)
+        local character = self.inst.prefab
+        local removed = TemporarilyRemoveBlueprintSkills(self, character)
+        local data = old_onsave ~= nil and old_onsave(self, ...) or nil
+        RestoreTemporarilyRemovedSkills(self, character, removed)
+
+        local blueprint_skills = CopyBlueprintSkills(self._techlost_blueprint_skills)
+        if blueprint_skills ~= nil then
+            data = data or {}
+            data.techlost_blueprint_skills = blueprint_skills
+        end
+
+        return data
+    end
+
+    local old_onload = self.OnLoad
+    self.OnLoad = function(self, data, ...)
+        if old_onload ~= nil then
+            old_onload(self, data, ...)
+        end
+        self._techlost_blueprint_skills =
+            data ~= nil and CopyBlueprintSkills(data.techlost_blueprint_skills)
+            or nil
+
+        if self._techlost_blueprint_skills ~= nil then
+            self.inst:DoTaskInTime(0, function()
+                if self.inst.components ~= nil
+                    and self.inst.components.skilltreeupdater == self then
+                    ApplyBlueprintSkills(self)
+                end
+            end)
+        end
+    end
+
+    local old_transfer_component = self.TransferComponent
+    self.TransferComponent = function(self, newinst, ...)
+        if old_transfer_component ~= nil then
+            old_transfer_component(self, newinst, ...)
+        end
+        if newinst ~= nil
+            and newinst.components ~= nil
+            and newinst.components.skilltreeupdater ~= nil then
+            local new_updater = newinst.components.skilltreeupdater
+            new_updater._techlost_blueprint_skills =
+                CopyBlueprintSkills(self._techlost_blueprint_skills)
+            ApplyBlueprintSkills(new_updater)
+        end
+    end
+
+    local old_send_from_skill_tree_blob = self.SendFromSkillTreeBlob
+    self.SendFromSkillTreeBlob = function(self, ...)
+        if old_send_from_skill_tree_blob ~= nil then
+            old_send_from_skill_tree_blob(self, ...)
+        end
+        ApplyBlueprintSkills(self)
+    end
+
+    local old_deactivate_skill = self.DeactivateSkill
+    self.DeactivateSkill = function(self, skill, ...)
+        local character = self.inst.prefab
+        local was_activated = self:IsActivated(skill)
+        local result = old_deactivate_skill ~= nil
+            and old_deactivate_skill(self, skill, ...)
+            or nil
+        if was_activated and not self:IsActivated(skill) then
+            ForgetBlueprintSkill(self, character, skill)
+        end
+        return result
+    end
+end)
+
 if AddClassPostConstruct ~= nil then
     AddClassPostConstruct("components/builder_replica", function(self)
         local old_knows_recipe = self.KnowsRecipe
@@ -757,7 +1289,9 @@ local function GetTumbleweedBlueprintRecipes()
     local candidates = {}
 
     for _, recipe in pairs(GLOBAL.AllRecipes) do
-        if recipe._blueprint_only_locked and IsBlueprintPoolRecipe(recipe) then
+        if recipe._blueprint_only_locked
+            and IsBlueprintPoolRecipe(recipe)
+            and IsRecipeActiveForBlueprintPool(recipe) then
             candidates[#candidates + 1] = recipe
         end
     end
@@ -783,8 +1317,49 @@ local function GetAdvancedBlueprintRecipes()
     local candidates = {}
 
     for _, recipe in pairs(GLOBAL.AllRecipes) do
-        if recipe._blueprint_only_locked and IsAdvancedBlueprintPoolRecipe(recipe) then
+        if recipe._blueprint_only_locked
+            and IsAdvancedBlueprintPoolRecipe(recipe)
+            and IsRecipeActiveForBlueprintPool(recipe) then
             candidates[#candidates + 1] = recipe
+        end
+    end
+
+    return candidates
+end
+
+local function IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data)
+    return include_skill_tree_node_blueprints
+        and type(character) == "string"
+        and type(skill) == "string"
+        and type(skill_data) == "table"
+        and IsSelectableCharacter(character)
+        and IsCharacterActiveForBlueprintPool(character)
+        and skill_data.rpc_id ~= nil
+        and skill_data.infographic == nil
+        and skill_data.lock_open == nil
+        and IsSkillTreeNodeAvailableForBlueprintPool(character, skill, skill_data)
+end
+
+local function GetSkillTreeNodeBlueprintCandidates()
+    local candidates = {}
+    local skill_defs = skilltree_defs ~= nil
+        and skilltree_defs.SKILLTREE_DEFS
+        or nil
+    if skill_defs == nil then
+        return candidates
+    end
+
+    for character, skills in pairs(skill_defs) do
+        if IsSelectableCharacter(character) then
+            for skill, skill_data in pairs(skills) do
+                if IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data) then
+                    candidates[#candidates + 1] = {
+                        character = character,
+                        skill = skill,
+                        data = skill_data,
+                    }
+                end
+            end
         end
     end
 
@@ -877,6 +1452,43 @@ local function ConfigureBlueprint(blueprint, recipe)
     if IsBlueprintPoolRecipe(recipe) then
         blueprint._techlost_blueprint_pool_generated = true
         blueprint._techlost_last_rain_wash_count = GetWorldRainWashCount()
+    end
+
+    return true
+end
+
+local function GetSkillTreeNodeBlueprintName(character, skill, skill_data)
+    local skill_title = skill_data ~= nil and skill_data.title or nil
+    local blueprint_name = GLOBAL.STRINGS.NAMES.BLUEPRINT or "Blueprint"
+    if type(skill_title) == "string" and skill_title ~= "" then
+        return skill_title .. " " .. blueprint_name
+    end
+
+    return skill .. " " .. blueprint_name
+end
+
+local function ConfigureSkillTreeNodeBlueprint(blueprint, candidate)
+    if blueprint == nil
+        or candidate == nil
+        or blueprint.components == nil
+        or blueprint.components.teacher == nil then
+        return false
+    end
+
+    blueprint.recipetouse = nil
+    blueprint.components.teacher:SetRecipe(nil)
+    blueprint._techlost_skill_blueprint = true
+    blueprint._techlost_skill_blueprint_character = candidate.character
+    blueprint._techlost_skill_blueprint_skill = candidate.skill
+    blueprint._techlost_blueprint_pool_generated = true
+    blueprint._techlost_last_rain_wash_count = GetWorldRainWashCount()
+
+    if blueprint.components.named ~= nil then
+        blueprint.components.named:SetName(GetSkillTreeNodeBlueprintName(
+            candidate.character,
+            candidate.skill,
+            candidate.data
+        ))
     end
 
     return true
@@ -1030,6 +1642,10 @@ local function AddPirateTreasureAdvancedBlueprint(stash)
 end
 
 local function RepairInvalidBlueprint(blueprint)
+    if blueprint._techlost_skill_blueprint then
+        return
+    end
+
     local current_recipe = blueprint.recipetouse ~= nil
         and GLOBAL.AllRecipes[blueprint.recipetouse]
         or nil
@@ -1150,6 +1766,12 @@ AddPrefabPostInit("blueprint", function(inst)
                 inst._techlost_blueprint_pool_generated or nil
             data.techlost_last_rain_wash_count =
                 inst._techlost_last_rain_wash_count or nil
+            data.techlost_skill_blueprint =
+                inst._techlost_skill_blueprint or nil
+            data.techlost_skill_blueprint_character =
+                inst._techlost_skill_blueprint_character or nil
+            data.techlost_skill_blueprint_skill =
+                inst._techlost_skill_blueprint_skill or nil
         end
     end
 
@@ -1164,6 +1786,29 @@ AddPrefabPostInit("blueprint", function(inst)
                 data.techlost_blueprint_pool_generated or nil
             inst._techlost_last_rain_wash_count =
                 data.techlost_last_rain_wash_count or nil
+            inst._techlost_skill_blueprint =
+                data.techlost_skill_blueprint or nil
+            inst._techlost_skill_blueprint_character =
+                data.techlost_skill_blueprint_character or nil
+            inst._techlost_skill_blueprint_skill =
+                data.techlost_skill_blueprint_skill or nil
+            if inst._techlost_skill_blueprint then
+                inst.recipetouse = nil
+                if inst.components.teacher ~= nil then
+                    inst.components.teacher:SetRecipe(nil)
+                end
+                local skill_data = GetSkillData(
+                    inst._techlost_skill_blueprint_character,
+                    inst._techlost_skill_blueprint_skill
+                )
+                if inst.components.named ~= nil then
+                    inst.components.named:SetName(GetSkillTreeNodeBlueprintName(
+                        inst._techlost_skill_blueprint_character,
+                        inst._techlost_skill_blueprint_skill,
+                        skill_data
+                    ))
+                end
+            end
         end
         RepairInvalidBlueprint(inst)
         inst:DoTaskInTime(0, ReconcileBlueprintRainWashes)
@@ -1243,6 +1888,39 @@ local function DropRandomBlueprint(inst)
     blueprint.Transform:SetPosition(inst.Transform:GetWorldPosition())
 end
 
+local function DropRandomSkillTreeNodeBlueprint(inst)
+    local candidates = GetSkillTreeNodeBlueprintCandidates()
+    if #candidates == 0 then
+        return
+    end
+
+    local blueprint = GLOBAL.SpawnPrefab("blueprint")
+    if blueprint == nil then
+        return
+    end
+
+    if not ConfigureSkillTreeNodeBlueprint(
+        blueprint,
+        candidates[math.random(#candidates)]
+    ) then
+        blueprint:Remove()
+        return
+    end
+
+    blueprint.Transform:SetPosition(inst.Transform:GetWorldPosition())
+end
+
+local function TryDropRandomBlueprints(inst)
+    if math.random() < tumbleweed_blueprint_chance then
+        DropRandomBlueprint(inst)
+    end
+
+    if include_skill_tree_node_blueprints
+        and math.random() < tumbleweed_blueprint_chance then
+        DropRandomSkillTreeNodeBlueprint(inst)
+    end
+end
+
 AddPrefabPostInit("powder_monkey", function(inst)
     if not GLOBAL.TheWorld.ismastersim
         or not include_powder_monkey_blueprints then
@@ -1250,9 +1928,7 @@ AddPrefabPostInit("powder_monkey", function(inst)
     end
 
     inst:ListenForEvent("death", function(inst)
-        if math.random() < tumbleweed_blueprint_chance then
-            DropRandomBlueprint(inst)
-        end
+        TryDropRandomBlueprints(inst)
     end)
 end)
 
@@ -1264,9 +1940,7 @@ AddPrefabPostInit("tumbleweed", function(inst)
 
     local old_onpickedfn = inst.components.pickable.onpickedfn
     inst.components.pickable.onpickedfn = function(inst, picker, ...)
-        if math.random() < tumbleweed_blueprint_chance then
-            DropRandomBlueprint(inst)
-        end
+        TryDropRandomBlueprints(inst)
 
         if old_onpickedfn ~= nil then
             old_onpickedfn(inst, picker, ...)
