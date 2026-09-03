@@ -177,7 +177,7 @@ local function CopyCharacterSet(characters)
         end
     end
 
-    return next(copy) ~= nil and copy or nil
+    return GLOBAL.next(copy) ~= nil and copy or nil
 end
 
 local function MarkJoinedCharacterForBlueprintPool(player)
@@ -1020,7 +1020,7 @@ local function CopyBlueprintSkillUnlocks(skill_unlocks)
         end
     end
 
-    return next(copy) ~= nil and copy or nil
+    return GLOBAL.next(copy) ~= nil and copy or nil
 end
 
 local function MergeBlueprintSkillUnlocks(first_skill_unlocks, second_skill_unlocks)
@@ -1044,7 +1044,7 @@ local function MergeBlueprintSkillUnlocks(first_skill_unlocks, second_skill_unlo
     Merge(first_skill_unlocks)
     Merge(second_skill_unlocks)
 
-    return next(copy) ~= nil and copy or nil
+    return GLOBAL.next(copy) ~= nil and copy or nil
 end
 
 local function IsSkillTreeNodeActivationAllowed(
