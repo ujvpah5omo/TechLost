@@ -2,10 +2,10 @@ name = "全科技蓝图解锁"
 description = [[
 符合条件的普通科技配方初始只能通过蓝图解锁。原生稀有蓝图保留 Boss、任务及商店等专属获取途径。
 
-角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的配方可从风滚草和海盗猴获得蓝图。角色相关蓝图只会在对应角色玩家在线时进入掉落池。技能树节点可配置为通过蓝图点亮。本 Mod 蓝图池生成的地面蓝图可配置为经过数次下雨后消失。
+角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的配方可从风滚草和海盗猴获得蓝图。角色相关蓝图可配置为只按在线角色、已加入世界角色或全部已启用角色进入掉落池。技能树节点可配置为需要先学习蓝图许可，再按原版技能点和前置条件手动点亮。本 Mod 蓝图池生成的地面蓝图可配置为经过数次下雨后消失。
 ]]
 author = "Codex"
-version = "2.10.0"
+version = "2.10.3"
 
 api_version = 10
 dst_compatible = true
@@ -33,7 +33,7 @@ configuration_options =
     {
         name = "include_skill_tree_node_blueprints",
         label = "技能树节点蓝图",
-        hover = "开启后，风滚草和海盗猴可额外掉落技能树节点蓝图；只掉落当前在线角色的节点。对应角色使用后直接点亮技能，不消耗技能点，但必须满足前置条件。",
+        hover = "开启后，风滚草和海盗猴可额外掉落技能树节点蓝图；角色范围由“角色蓝图池过滤”控制。对应角色学习蓝图后获得点亮许可，仍需自己消耗技能点并满足前置条件。",
         options =
         {
             { description = "关闭", data = false },
@@ -44,13 +44,25 @@ configuration_options =
     {
         name = "include_character_tag_recipes",
         label = "角色专属科技蓝图",
-        hover = "开启后，非技能树且需要科技站的角色专属配方会进入蓝图池；只掉落当前在线角色的配方。只有对应角色能学习，禁用角色的配方不会进入蓝图池。",
+        hover = "开启后，非技能树且需要科技站的角色专属配方会进入蓝图池；角色范围由“角色蓝图池过滤”控制。只有对应角色能学习，禁用角色的配方不会进入蓝图池。",
         options =
         {
             { description = "关闭", data = false },
             { description = "开启", data = true },
         },
         default = false,
+    },
+    {
+        name = "character_blueprint_pool_filter",
+        label = "角色蓝图池过滤",
+        hover = "控制角色专属科技、技能树配方、技能树节点等角色相关蓝图的掉落范围。",
+        options =
+        {
+            { description = "仅在线角色", data = "online" },
+            { description = "已加入世界", data = "joined" },
+            { description = "全部启用角色", data = "enabled" },
+        },
+        default = "online",
     },
     {
         name = "include_ancient_tech",
