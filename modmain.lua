@@ -9,8 +9,12 @@ local include_lunar_forge_tech = GetModConfigData("include_lunar_forge_tech") ==
 local include_shadow_forge_tech = GetModConfigData("include_shadow_forge_tech") == true
 local include_skill_tree_recipes =
     GetModConfigData("include_skill_tree_recipes") == true
+local skill_tree_node_blueprint_mode =
+    GetModConfigData("include_skill_tree_node_blueprints")
 local include_skill_tree_node_blueprints =
-    GetModConfigData("include_skill_tree_node_blueprints") == true
+    skill_tree_node_blueprint_mode == true
+    or skill_tree_node_blueprint_mode == "enabled"
+    or skill_tree_node_blueprint_mode == "after_both_rifts"
 local include_character_tag_recipes =
     GetModConfigData("include_character_tag_recipes") == true
 local character_blueprint_pool_filter =
@@ -350,6 +354,18 @@ local function IsShadowRiftEnabled()
     return riftspawner ~= nil
         and riftspawner.GetShadowRiftsEnabled ~= nil
         and riftspawner:GetShadowRiftsEnabled()
+end
+
+local function IsSkillTreeNodeBlueprintControlEnabled()
+    return include_skill_tree_node_blueprints
+end
+
+local function IsSkillTreeNodeBlueprintDropEnabled()
+    if skill_tree_node_blueprint_mode == "after_both_rifts" then
+        return IsLunarRiftEnabled() and IsShadowRiftEnabled()
+    end
+
+    return include_skill_tree_node_blueprints
 end
 
 local function IsForgeTechnologyAvailableForBlueprintPool(level)
@@ -808,7 +824,7 @@ local function GetSkillData(character, skill)
 end
 
 local function IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
-    return include_skill_tree_node_blueprints
+    return IsSkillTreeNodeBlueprintControlEnabled()
         and type(character) == "string"
         and type(skill) == "string"
         and type(skill_data) == "table"
@@ -860,12 +876,7 @@ local function CanLearnSkillTreeBlueprint(target, character, skill)
         or target.prefab ~= character
         or skill_data == nil
         or not updater:IsValidSkill(skill)
-        or not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
-        or not IsSkillTreeNodeAvailableForBlueprintPool(
-            character,
-            skill,
-            skill_data
-        ) then
+        or not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
         return false, "CANTLEARN"
     end
 
@@ -1065,7 +1076,8 @@ local function GetBlockedSkillTreeNodeActivation(
     character,
     activated_skills
 )
-    if not include_skill_tree_node_blueprints or activated_skills == nil then
+    if not IsSkillTreeNodeBlueprintControlEnabled()
+        or activated_skills == nil then
         return nil
     end
 
@@ -1102,7 +1114,7 @@ local function ValidateCharacterDataWithBlueprintSkillUnlocks(
 end
 
 local function RemoveUnauthorizedSkillTreeNodeActivations(updater)
-    if not include_skill_tree_node_blueprints
+    if not IsSkillTreeNodeBlueprintControlEnabled()
         or updater == nil
         or updater.GetActivatedSkills == nil then
         return false
@@ -1335,6 +1347,7 @@ end
 
 local function IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data)
     return IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
+        and IsSkillTreeNodeBlueprintDropEnabled()
         and IsCharacterAllowedForBlueprintPool(character)
         and IsSkillTreeNodeAvailableForBlueprintPool(character, skill, skill_data)
 end
@@ -1944,7 +1957,7 @@ local function TryDropRandomBlueprints(inst)
         DropRandomBlueprint(inst)
     end
 
-    if include_skill_tree_node_blueprints
+    if IsSkillTreeNodeBlueprintDropEnabled()
         and math.random() < tumbleweed_blueprint_chance then
         DropRandomSkillTreeNodeBlueprint(inst)
     end
