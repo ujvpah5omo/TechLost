@@ -1345,14 +1345,21 @@ local function GetAdvancedBlueprintRecipes()
     return candidates
 end
 
-local function IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data)
+local function IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data, character_filter)
+    local character_allowed = false
+    if character_filter ~= nil then
+        character_allowed = character_filter(character)
+    else
+        character_allowed = IsCharacterAllowedForBlueprintPool(character)
+    end
+
     return IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
         and IsSkillTreeNodeBlueprintDropEnabled()
-        and IsCharacterAllowedForBlueprintPool(character)
+        and character_allowed
         and IsSkillTreeNodeAvailableForBlueprintPool(character, skill, skill_data)
 end
 
-local function GetSkillTreeNodeBlueprintCandidates()
+local function GetSkillTreeNodeBlueprintCandidates(character_filter)
     local candidates = {}
     local skill_defs = skilltree_defs ~= nil
         and skilltree_defs.SKILLTREE_DEFS
@@ -1364,7 +1371,7 @@ local function GetSkillTreeNodeBlueprintCandidates()
     for character, skills in pairs(skill_defs) do
         if IsSelectableCharacter(character) then
             for skill, skill_data in pairs(skills) do
-                if IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data) then
+                if IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data, character_filter) then
                     candidates[#candidates + 1] = {
                         character = character,
                         skill = skill,
@@ -1930,8 +1937,8 @@ local function DropRandomBlueprint(inst)
     blueprint.Transform:SetPosition(inst.Transform:GetWorldPosition())
 end
 
-local function DropRandomSkillTreeNodeBlueprint(inst)
-    local candidates = GetSkillTreeNodeBlueprintCandidates()
+local function DropRandomSkillTreeNodeBlueprint(inst, character_filter)
+    local candidates = GetSkillTreeNodeBlueprintCandidates(character_filter)
     if #candidates == 0 then
         return
     end
@@ -1950,6 +1957,79 @@ local function DropRandomSkillTreeNodeBlueprint(inst)
     end
 
     blueprint.Transform:SetPosition(inst.Transform:GetWorldPosition())
+end
+
+local function GetPlayerFromBlueprintDropSource(source)
+    if source == nil then
+        return nil
+    end
+
+    if source.HasTag ~= nil and source:HasTag("player") then
+        return source
+    end
+
+    local inventory_owner = source.components ~= nil
+        and source.components.inventoryitem ~= nil
+        and source.components.inventoryitem.owner
+        or nil
+    if inventory_owner ~= nil
+        and inventory_owner.HasTag ~= nil
+        and inventory_owner:HasTag("player") then
+        return inventory_owner
+    end
+
+    local leader = source.components ~= nil
+        and source.components.follower ~= nil
+        and source.components.follower.GetLeader ~= nil
+        and source.components.follower:GetLeader()
+        or nil
+    if leader ~= nil
+        and leader.HasTag ~= nil
+        and leader:HasTag("player") then
+        return leader
+    end
+
+    local owner = source.owner
+    if owner ~= nil
+        and owner.HasTag ~= nil
+        and owner:HasTag("player") then
+        return owner
+    end
+
+    return nil
+end
+
+local function GetPrimeMateBlueprintDropCharacter(inst, data)
+    local player = data ~= nil
+        and GetPlayerFromBlueprintDropSource(data.afflicter)
+        or nil
+
+    if player == nil then
+        player = inst.components ~= nil
+            and inst.components.combat ~= nil
+            and GetPlayerFromBlueprintDropSource(inst.components.combat.lastattacker)
+            or nil
+    end
+
+    return player ~= nil
+        and player.prefab
+        or nil
+end
+
+local function MakeCharacterBlueprintFilter(character)
+    return function(candidate_character)
+        return candidate_character == character
+    end
+end
+
+local function DropPrimeMateSkillTreeNodeBlueprint(inst, data)
+    local character = GetPrimeMateBlueprintDropCharacter(inst, data)
+    if character ~= nil then
+        DropRandomSkillTreeNodeBlueprint(inst, MakeCharacterBlueprintFilter(character))
+        return
+    end
+
+    DropRandomSkillTreeNodeBlueprint(inst, IsCharacterActiveForBlueprintPool)
 end
 
 local function TryDropRandomBlueprints(inst)
@@ -1971,6 +2051,16 @@ AddPrefabPostInit("powder_monkey", function(inst)
 
     inst:ListenForEvent("death", function(inst)
         TryDropRandomBlueprints(inst)
+    end)
+end)
+
+AddPrefabPostInit("prime_mate", function(inst)
+    if not GLOBAL.TheWorld.ismastersim then
+        return
+    end
+
+    inst:ListenForEvent("death", function(inst, data)
+        DropPrimeMateSkillTreeNodeBlueprint(inst, data)
     end)
 end)
 
