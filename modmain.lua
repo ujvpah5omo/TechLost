@@ -17,8 +17,6 @@ local include_skill_tree_node_blueprints =
     or skill_tree_node_blueprint_mode == "after_both_rifts"
 local include_character_tag_recipes =
     GetModConfigData("include_character_tag_recipes") == true
-local character_blueprint_pool_filter =
-    GetModConfigData("character_blueprint_pool_filter") or "online"
 local include_powder_monkey_blueprints =
     GetModConfigData("include_powder_monkey_blueprints") ~= false
 local lose_tech_on_death = GetModConfigData("lose_tech_on_death") == true
@@ -29,8 +27,9 @@ local sunken_treasure_advanced_blueprint_chance =
 local pirate_treasure_advanced_blueprint_chance =
     GetModConfigData("pirate_treasure_advanced_blueprints") or 0
 
-local SKILL_TREE_BLUEPRINT_REQUIRED_MESSAGE = "需要先学习该技能蓝图"
-local SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE = "未学习蓝图的技能已被取消"
+local SKILL_TREE_BLUEPRINT_REQUIRED_MESSAGE = "需要先学习技能许可蓝图"
+local SKILL_TREE_RIFT_REQUIRED_MESSAGE = "需要月亮裂隙和暗影裂隙都开启"
+local SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE = "未满足许可条件的技能已被取消"
 
 local CHARACTER_RECIPE_TAG_OWNERS = {
     pyromaniac = "willow",
@@ -155,78 +154,6 @@ local function IsSelectableCharacter(character)
             and table.contains(GLOBAL.MODCHARACTERLIST, character))
 end
 
-local function IsCharacterActiveForBlueprintPool(character)
-    if type(character) ~= "string" or GLOBAL.AllPlayers == nil then
-        return false
-    end
-
-    for _, player in ipairs(GLOBAL.AllPlayers) do
-        if player ~= nil and player.prefab == character then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function CopyCharacterSet(characters)
-    if type(characters) ~= "table" then
-        return nil
-    end
-
-    local copy = {}
-    for character, enabled in pairs(characters) do
-        if type(character) == "string" and enabled == true then
-            copy[character] = true
-        end
-    end
-
-    return GLOBAL.next(copy) ~= nil and copy or nil
-end
-
-local function MarkJoinedCharacterForBlueprintPool(player)
-    if player == nil
-        or not IsSelectableCharacter(player.prefab)
-        or GLOBAL.TheWorld == nil
-        or not GLOBAL.TheWorld.ismastersim then
-        return
-    end
-
-    GLOBAL.TheWorld._techlost_joined_blueprint_characters =
-        GLOBAL.TheWorld._techlost_joined_blueprint_characters or {}
-    GLOBAL.TheWorld._techlost_joined_blueprint_characters[player.prefab] = true
-end
-
-local function MarkActiveCharactersForBlueprintPool()
-    if GLOBAL.AllPlayers == nil then
-        return
-    end
-
-    for _, player in ipairs(GLOBAL.AllPlayers) do
-        MarkJoinedCharacterForBlueprintPool(player)
-    end
-end
-
-local function IsCharacterJoinedForBlueprintPool(character)
-    local joined_characters = GLOBAL.TheWorld ~= nil
-        and GLOBAL.TheWorld._techlost_joined_blueprint_characters
-        or nil
-    return type(character) == "string"
-        and ((joined_characters ~= nil
-                and joined_characters[character] == true)
-            or IsCharacterActiveForBlueprintPool(character))
-end
-
-local function IsCharacterAllowedForBlueprintPool(character)
-    if character_blueprint_pool_filter == "enabled" then
-        return IsSelectableCharacter(character)
-    elseif character_blueprint_pool_filter == "joined" then
-        return IsCharacterJoinedForBlueprintPool(character)
-    end
-
-    return IsCharacterActiveForBlueprintPool(character)
-end
-
 local function GetSkillOwnerCharacter(skill)
     local skill_defs = skilltree_defs ~= nil
         and skilltree_defs.SKILLTREE_DEFS
@@ -280,8 +207,22 @@ local function GetCharacterDisplayName(character)
 end
 
 local function IsRecipeActiveForBlueprintPool(recipe)
-    local character = GetRecipeOwnerCharacter(recipe)
-    return character == nil or IsCharacterAllowedForBlueprintPool(character)
+    return GetRecipeOwnerCharacter(recipe) == nil
+end
+
+local function IsRecipeAllowedForRewardCharacter(recipe, character)
+    local owner = GetRecipeOwnerCharacter(recipe)
+    return owner == nil or owner == character
+end
+
+local function GetRewardCharacter(player)
+    if player == nil
+        or type(player.prefab) ~= "string"
+        or not IsSelectableCharacter(player.prefab) then
+        return nil
+    end
+
+    return player.prefab
 end
 
 local function IsCharacterTagRecipeEnabled(recipe, level)
@@ -360,12 +301,12 @@ local function IsSkillTreeNodeBlueprintControlEnabled()
     return include_skill_tree_node_blueprints
 end
 
-local function IsSkillTreeNodeBlueprintDropEnabled()
+local function IsSkillTreeNodeBlueprintActivationProgressAllowed()
     if skill_tree_node_blueprint_mode == "after_both_rifts" then
         return IsLunarRiftEnabled() and IsShadowRiftEnabled()
     end
 
-    return include_skill_tree_node_blueprints
+    return true
 end
 
 local function IsForgeTechnologyAvailableForBlueprintPool(level)
@@ -834,9 +775,104 @@ local function IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
 end
 
 local function IsSkillTreeNodeBlueprintUnlocked(updater, character, skill)
-    return updater._techlost_blueprint_skill_unlocks ~= nil
+    return updater ~= nil
+        and updater._techlost_blueprint_skill_unlocks ~= nil
         and updater._techlost_blueprint_skill_unlocks[character] ~= nil
         and updater._techlost_blueprint_skill_unlocks[character][skill] == true
+end
+
+local function GetSkillTreePermitPoints(updater, character)
+    return updater ~= nil
+        and updater._techlost_skill_permit_points ~= nil
+        and updater._techlost_skill_permit_points[character]
+        or 0
+end
+
+local function SetSkillTreePermitPoints(updater, character, points)
+    if updater == nil or type(character) ~= "string" then
+        return
+    end
+
+    updater._techlost_skill_permit_points =
+        updater._techlost_skill_permit_points or {}
+    if points > 0 then
+        updater._techlost_skill_permit_points[character] = points
+    else
+        updater._techlost_skill_permit_points[character] = nil
+        if GLOBAL.next(updater._techlost_skill_permit_points) == nil then
+            updater._techlost_skill_permit_points = nil
+        end
+    end
+end
+
+local function AddSkillTreePermitPoint(updater, character)
+    SetSkillTreePermitPoints(
+        updater,
+        character,
+        GetSkillTreePermitPoints(updater, character) + 1
+    )
+end
+
+local function ConsumeSkillTreePermitPoint(updater, character)
+    local points = GetSkillTreePermitPoints(updater, character)
+    if points <= 0 then
+        return false
+    end
+
+    SetSkillTreePermitPoints(updater, character, points - 1)
+    return true
+end
+
+local function GetSkillTreePermitCapacity(character)
+    local skills = skilltree_defs ~= nil
+        and skilltree_defs.SKILLTREE_DEFS ~= nil
+        and skilltree_defs.SKILLTREE_DEFS[character]
+        or nil
+    if type(skills) ~= "table" then
+        return 0
+    end
+
+    local capacity = 0
+    for skill, skill_data in pairs(skills) do
+        if IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
+            capacity = capacity + 1
+        end
+    end
+
+    return capacity
+end
+
+local function CountBlueprintSkillUnlocks(updater, character)
+    local unlocks = updater ~= nil
+        and updater._techlost_blueprint_skill_unlocks ~= nil
+        and updater._techlost_blueprint_skill_unlocks[character]
+        or nil
+    if type(unlocks) ~= "table" then
+        return 0
+    end
+
+    local count = 0
+    for skill, unlocked in pairs(unlocks) do
+        if unlocked == true
+            and IsSkillTreeNodeBlueprintControlled(
+                character,
+                skill,
+                GetSkillData(character, skill)
+            ) then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+local function GetSkillTreePermitRoom(updater, character)
+    return math.max(
+        0,
+        GetSkillTreePermitCapacity(character)
+            - CountBlueprintSkillUnlocks(updater, character)
+            - GetSkillTreePermitPoints(updater, character)
+    )
 end
 
 local function SayWithCooldown(inst, message, cooldown_key)
@@ -861,6 +897,14 @@ local function SaySkillTreeBlueprintRequired(inst)
     )
 end
 
+local function SaySkillTreeRiftRequired(inst)
+    SayWithCooldown(
+        inst,
+        SKILL_TREE_RIFT_REQUIRED_MESSAGE,
+        "_techlost_last_skill_rift_hint_time"
+    )
+end
+
 local function SayUnauthorizedSkillTreeNodesRemoved(inst)
     SayWithCooldown(
         inst,
@@ -869,19 +913,16 @@ local function SayUnauthorizedSkillTreeNodesRemoved(inst)
     )
 end
 
-local function CanLearnSkillTreeBlueprint(target, character, skill)
+local function CanLearnSkillTreeBlueprint(target, character)
     local updater = GetSkillTreeUpdater(target)
-    local skill_data = GetSkillData(character, skill)
     if updater == nil
         or target.prefab ~= character
-        or skill_data == nil
-        or not updater:IsValidSkill(skill)
-        or not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
+        or not IsSkillTreeNodeBlueprintControlEnabled()
+        or not IsSelectableCharacter(character) then
         return false, "CANTLEARN"
     end
 
-    if updater:IsActivated(skill)
-        or IsSkillTreeNodeBlueprintUnlocked(updater, character, skill) then
+    if GetSkillTreePermitRoom(updater, character) <= 0 then
         return false, "KNOWN"
     end
 
@@ -896,14 +937,14 @@ local function RememberBlueprintSkillUnlock(updater, character, skill)
     updater._techlost_blueprint_skill_unlocks[character][skill] = true
 end
 
-local function UnlockSkillFromBlueprint(target, character, skill)
-    local can_learn, reason = CanLearnSkillTreeBlueprint(target, character, skill)
+local function UnlockSkillFromBlueprint(target, character)
+    local can_learn, reason = CanLearnSkillTreeBlueprint(target, character)
     if not can_learn then
         return false, reason
     end
 
     local updater = target.components.skilltreeupdater
-    RememberBlueprintSkillUnlock(updater, character, skill)
+    AddSkillTreePermitPoint(updater, character)
     return true
 end
 
@@ -921,8 +962,7 @@ AddComponentPostInit("teacher", function(self)
         if self.inst ~= nil and self.inst._techlost_skill_blueprint then
             local success, reason = UnlockSkillFromBlueprint(
                 target,
-                self.inst._techlost_skill_blueprint_character,
-                self.inst._techlost_skill_blueprint_skill
+                self.inst._techlost_skill_blueprint_character
             )
             if success then
                 self.inst:Remove()
@@ -1058,17 +1098,111 @@ local function MergeBlueprintSkillUnlocks(first_skill_unlocks, second_skill_unlo
     return GLOBAL.next(copy) ~= nil and copy or nil
 end
 
-local function IsSkillTreeNodeActivationAllowed(
+local function CopySkillTreePermitPoints(permit_points)
+    if type(permit_points) ~= "table" then
+        return nil
+    end
+
+    local copy = {}
+    for character, points in pairs(permit_points) do
+        if type(character) == "string"
+            and type(points) == "number"
+            and points > 0 then
+            local safe_points = math.floor(points)
+            if safe_points > 0 then
+                copy[character] = safe_points
+            end
+        end
+    end
+
+    return GLOBAL.next(copy) ~= nil and copy or nil
+end
+
+local function GetSkillTreeNodeActivationBlockReason(
     updater,
     character,
     skill
 )
     local skill_data = GetSkillData(character, skill)
     if not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
-        return true
+        return nil
     end
 
-    return IsSkillTreeNodeBlueprintUnlocked(updater, character, skill)
+    if IsSkillTreeNodeBlueprintUnlocked(updater, character, skill) then
+        if not IsSkillTreeNodeAvailableForBlueprintPool(
+            character,
+            skill,
+            skill_data
+        ) or not IsSkillTreeNodeBlueprintActivationProgressAllowed() then
+            return "RIFT"
+        end
+
+        return nil
+    end
+
+    if GetSkillTreePermitPoints(updater, character) <= 0 then
+        return "BLUEPRINT"
+    end
+
+    if not IsSkillTreeNodeAvailableForBlueprintPool(
+        character,
+        skill,
+        skill_data
+    ) or not IsSkillTreeNodeBlueprintActivationProgressAllowed() then
+        return "RIFT"
+    end
+
+    return nil
+end
+
+local function GetExistingSkillTreeNodeActivationBlockReason(
+    updater,
+    character,
+    skill
+)
+    local skill_data = GetSkillData(character, skill)
+    if not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
+        return nil
+    end
+
+    if not IsSkillTreeNodeBlueprintUnlocked(updater, character, skill) then
+        if updater._techlost_pending_skill_permit_activation == skill
+            and GetSkillTreePermitPoints(updater, character) > 0 then
+            if not IsSkillTreeNodeAvailableForBlueprintPool(
+                character,
+                skill,
+                skill_data
+            ) or not IsSkillTreeNodeBlueprintActivationProgressAllowed() then
+                return "RIFT"
+            end
+
+            return nil
+        end
+
+        return "BLUEPRINT"
+    end
+
+    if not IsSkillTreeNodeAvailableForBlueprintPool(
+        character,
+        skill,
+        skill_data
+    ) or not IsSkillTreeNodeBlueprintActivationProgressAllowed() then
+        return "RIFT"
+    end
+
+    return nil
+end
+
+local function IsSkillTreeNodeActivationAllowed(
+    updater,
+    character,
+    skill
+)
+    return GetSkillTreeNodeActivationBlockReason(
+        updater,
+        character,
+        skill
+    ) == nil
 end
 
 local function GetBlockedSkillTreeNodeActivation(
@@ -1082,12 +1216,13 @@ local function GetBlockedSkillTreeNodeActivation(
     end
 
     for skill in pairs(activated_skills) do
-        if not IsSkillTreeNodeActivationAllowed(
+        local reason = GetExistingSkillTreeNodeActivationBlockReason(
             updater,
             character,
             skill
-        ) then
-            return skill
+        )
+        if reason ~= nil then
+            return skill, reason
         end
     end
 
@@ -1099,13 +1234,18 @@ local function ValidateCharacterDataWithBlueprintSkillUnlocks(
     character,
     activated_skills
 )
-    if GetBlockedSkillTreeNodeActivation(
+    local blocked_skill, reason = GetBlockedSkillTreeNodeActivation(
         updater,
         character,
         activated_skills
-    ) ~= nil then
+    )
+    if blocked_skill ~= nil then
         if not updater._techlost_suppress_skill_blueprint_hint then
-            SaySkillTreeBlueprintRequired(updater.inst)
+            if reason == "RIFT" then
+                SaySkillTreeRiftRequired(updater.inst)
+            else
+                SaySkillTreeBlueprintRequired(updater.inst)
+            end
         end
         return false
     end
@@ -1128,13 +1268,11 @@ local function RemoveUnauthorizedSkillTreeNodeActivations(updater)
 
     local removed_skills = {}
     for skill in pairs(activated_skills) do
-        local skill_data = GetSkillData(character, skill)
-        if IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
-            and not IsSkillTreeNodeBlueprintUnlocked(
-                updater,
-                character,
-                skill
-            ) then
+        if GetExistingSkillTreeNodeActivationBlockReason(
+            updater,
+            character,
+            skill
+        ) ~= nil then
             removed_skills[#removed_skills + 1] = skill
         end
     end
@@ -1203,18 +1341,43 @@ AddComponentPostInit("skilltreeupdater", function(self)
     local old_activate_skill = self.ActivateSkill
     self.ActivateSkill = function(self, skill, ...)
         local character = self.inst.prefab
-        if not IsSkillTreeNodeActivationAllowed(
+        local should_consume_permit =
+            IsSkillTreeNodeBlueprintControlled(
+                character,
+                skill,
+                GetSkillData(character, skill)
+            )
+            and not IsSkillTreeNodeBlueprintUnlocked(self, character, skill)
+        local reason = GetSkillTreeNodeActivationBlockReason(
             self,
             character,
             skill
-        ) then
-            SaySkillTreeBlueprintRequired(self.inst)
+        )
+        if reason ~= nil then
+            if reason == "RIFT" then
+                SaySkillTreeRiftRequired(self.inst)
+            else
+                SaySkillTreeBlueprintRequired(self.inst)
+            end
             return false
         end
 
-        return old_activate_skill ~= nil
-            and old_activate_skill(self, skill, ...)
-            or nil
+        if should_consume_permit then
+            self._techlost_pending_skill_permit_activation = skill
+        end
+
+        local result, activate_reason = nil, nil
+        if old_activate_skill ~= nil then
+            result, activate_reason = old_activate_skill(self, skill, ...)
+        end
+        self._techlost_pending_skill_permit_activation = nil
+
+        if result and should_consume_permit then
+            ConsumeSkillTreePermitPoint(self, character)
+            RememberBlueprintSkillUnlock(self, character, skill)
+        end
+
+        return result, activate_reason
     end
 
     local old_onsave = self.OnSave
@@ -1225,6 +1388,12 @@ AddComponentPostInit("skilltreeupdater", function(self)
         if skill_unlocks ~= nil then
             data = data or {}
             data.techlost_blueprint_skill_unlocks = skill_unlocks
+        end
+        local permit_points =
+            CopySkillTreePermitPoints(self._techlost_skill_permit_points)
+        if permit_points ~= nil then
+            data = data or {}
+            data.techlost_skill_permit_points = permit_points
         end
 
         return data
@@ -1240,6 +1409,9 @@ AddComponentPostInit("skilltreeupdater", function(self)
                 data.techlost_blueprint_skill_unlocks,
                 data.techlost_blueprint_skills
             )
+            or nil
+        self._techlost_skill_permit_points = data ~= nil
+            and CopySkillTreePermitPoints(data.techlost_skill_permit_points)
             or nil
 
         DoStrictSkillTreeBlueprintCheck(self)
@@ -1258,6 +1430,12 @@ AddComponentPostInit("skilltreeupdater", function(self)
                 CopyBlueprintSkillUnlocks(
                     self._techlost_blueprint_skill_unlocks
                 )
+            new_updater._techlost_skill_permit_points =
+                newinst.prefab == self.inst.prefab
+                and CopySkillTreePermitPoints(
+                    self._techlost_skill_permit_points
+                )
+                or nil
             DoStrictSkillTreeBlueprintCheck(new_updater)
         end
     end
@@ -1331,13 +1509,13 @@ local function IsAdvancedBlueprintPoolRecipe(recipe)
             or IsSkillTreeTechnologyRecipe(recipe, original_level))
 end
 
-local function GetAdvancedBlueprintRecipes()
+local function GetAdvancedBlueprintRecipes(character)
     local candidates = {}
 
     for _, recipe in pairs(GLOBAL.AllRecipes) do
         if recipe._blueprint_only_locked
             and IsAdvancedBlueprintPoolRecipe(recipe)
-            and IsRecipeActiveForBlueprintPool(recipe) then
+            and IsRecipeAllowedForRewardCharacter(recipe, character) then
             candidates[#candidates + 1] = recipe
         end
     end
@@ -1345,16 +1523,20 @@ local function GetAdvancedBlueprintRecipes()
     return candidates
 end
 
-local function IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data, character_filter)
+local function IsSkillTreeNodeBlueprintCandidate(
+    character,
+    skill,
+    skill_data,
+    character_filter
+)
     local character_allowed = false
     if character_filter ~= nil then
         character_allowed = character_filter(character)
     else
-        character_allowed = IsCharacterAllowedForBlueprintPool(character)
+        character_allowed = IsSelectableCharacter(character)
     end
 
     return IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
-        and IsSkillTreeNodeBlueprintDropEnabled()
         and character_allowed
         and IsSkillTreeNodeAvailableForBlueprintPool(character, skill, skill_data)
 end
@@ -1371,12 +1553,16 @@ local function GetSkillTreeNodeBlueprintCandidates(character_filter)
     for character, skills in pairs(skill_defs) do
         if IsSelectableCharacter(character) then
             for skill, skill_data in pairs(skills) do
-                if IsSkillTreeNodeBlueprintCandidate(character, skill, skill_data, character_filter) then
+                if IsSkillTreeNodeBlueprintCandidate(
+                    character,
+                    skill,
+                    skill_data,
+                    character_filter
+                ) then
                     candidates[#candidates + 1] = {
                         character = character,
-                        skill = skill,
-                        data = skill_data,
                     }
+                    break
                 end
             end
         end
@@ -1423,7 +1609,6 @@ local function InitWorldRainWashCounter(inst)
         and inst.state.israining == true
 
     inst:WatchWorldState("israining", OnWorldRainChanged)
-    inst:DoTaskInTime(0, MarkActiveCharactersForBlueprintPool)
 
     local old_onsave = inst.OnSave
     inst.OnSave = function(inst, data)
@@ -1433,8 +1618,6 @@ local function InitWorldRainWashCounter(inst)
         if data ~= nil then
             data.techlost_rain_wash_count =
                 inst._techlost_rain_wash_count or nil
-            data.techlost_joined_blueprint_characters =
-                CopyCharacterSet(inst._techlost_joined_blueprint_characters)
         end
     end
 
@@ -1446,8 +1629,6 @@ local function InitWorldRainWashCounter(inst)
         if data ~= nil then
             inst._techlost_rain_wash_count =
                 data.techlost_rain_wash_count or 0
-            inst._techlost_joined_blueprint_characters =
-                CopyCharacterSet(data.techlost_joined_blueprint_characters)
         end
         inst._techlost_was_raining =
             inst.state ~= nil
@@ -1462,7 +1643,6 @@ AddPrefabPostInit("cave", InitWorldRainWashCounter)
 if AddPlayerPostInit ~= nil then
     AddPlayerPostInit(function(inst)
         if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
-            inst:DoTaskInTime(0, MarkJoinedCharacterForBlueprintPool)
             if inst.components ~= nil
                 and inst.components.skilltreeupdater ~= nil then
                 DoStrictSkillTreeBlueprintCheck(
@@ -1501,18 +1681,12 @@ local function ConfigureBlueprint(blueprint, recipe)
     return true
 end
 
-local function GetSkillTreeNodeBlueprintName(character, skill, skill_data)
-    local skill_title = skill_data ~= nil and skill_data.title or nil
+local function GetSkillTreeNodeBlueprintName(character)
     local blueprint_name = GLOBAL.STRINGS.NAMES.BLUEPRINT or "Blueprint"
-    local skill_name = skill
-    if type(skill_title) == "string" and skill_title ~= "" then
-        skill_name = skill_title
-    end
 
     return GetCharacterDisplayName(character)
         .. " - "
-        .. skill_name
-        .. " "
+        .. "技能许可"
         .. blueprint_name
 end
 
@@ -1528,23 +1702,22 @@ local function ConfigureSkillTreeNodeBlueprint(blueprint, candidate)
     blueprint.components.teacher:SetRecipe(nil)
     blueprint._techlost_skill_blueprint = true
     blueprint._techlost_skill_blueprint_character = candidate.character
-    blueprint._techlost_skill_blueprint_skill = candidate.skill
+    blueprint._techlost_skill_blueprint_skill = nil
     blueprint._techlost_blueprint_pool_generated = true
     blueprint._techlost_last_rain_wash_count = GetWorldRainWashCount()
 
     if blueprint.components.named ~= nil then
         blueprint.components.named:SetName(GetSkillTreeNodeBlueprintName(
-            candidate.character,
-            candidate.skill,
-            candidate.data
+            candidate.character
         ))
     end
 
     return true
 end
 
-local function GiveAdvancedBlueprint(container_owner)
-    local candidates = GetAdvancedBlueprintRecipes()
+local function GiveAdvancedBlueprint(container_owner, reward_player)
+    local candidates =
+        GetAdvancedBlueprintRecipes(GetRewardCharacter(reward_player))
     if #candidates == 0 then
         return false
     end
@@ -1656,7 +1829,7 @@ local function GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
     return math.random() < sunken_treasure_advanced_blueprint_chance and 1 or 0
 end
 
-local function AddSunkenTreasureAdvancedBlueprints(sunken_chest)
+local function AddSunkenTreasureAdvancedBlueprints(sunken_chest, opener)
     if sunken_treasure_advanced_blueprint_chance <= 0
         or sunken_chest == nil
         or sunken_chest._techlost_advanced_blueprints_checked
@@ -1665,20 +1838,28 @@ local function AddSunkenTreasureAdvancedBlueprints(sunken_chest)
         return
     end
 
+    if GetRewardCharacter(opener) == nil then
+        return
+    end
+
     sunken_chest._techlost_advanced_blueprints_checked = true
 
     local count = GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
     for _ = 1, count do
-        if not GiveAdvancedBlueprint(sunken_chest) then
+        if not GiveAdvancedBlueprint(sunken_chest, opener) then
             return
         end
     end
 end
 
-local function AddPirateTreasureAdvancedBlueprint(stash)
+local function AddPirateTreasureAdvancedBlueprint(stash, worker)
     if pirate_treasure_advanced_blueprint_chance <= 0
         or stash == nil
         or stash._techlost_advanced_blueprints_checked then
+        return
+    end
+
+    if GetRewardCharacter(worker) == nil then
         return
     end
 
@@ -1686,7 +1867,7 @@ local function AddPirateTreasureAdvancedBlueprint(stash)
 
     if stash._techlost_has_sunken_treasure
         or math.random() < pirate_treasure_advanced_blueprint_chance then
-        GiveAdvancedBlueprint(stash)
+        GiveAdvancedBlueprint(stash, worker)
     end
 end
 
@@ -1846,15 +2027,9 @@ AddPrefabPostInit("blueprint", function(inst)
                 if inst.components.teacher ~= nil then
                     inst.components.teacher:SetRecipe(nil)
                 end
-                local skill_data = GetSkillData(
-                    inst._techlost_skill_blueprint_character,
-                    inst._techlost_skill_blueprint_skill
-                )
                 if inst.components.named ~= nil then
                     inst.components.named:SetName(GetSkillTreeNodeBlueprintName(
-                        inst._techlost_skill_blueprint_character,
-                        inst._techlost_skill_blueprint_skill,
-                        skill_data
+                        inst._techlost_skill_blueprint_character
                     ))
                 end
             end
@@ -1889,7 +2064,22 @@ AddPrefabPostInit("sunkenchest", function(inst)
         end
     end
 
-    inst:DoTaskInTime(0, AddSunkenTreasureAdvancedBlueprints)
+    inst:ListenForEvent("onopen", function(inst, data)
+        AddSunkenTreasureAdvancedBlueprints(
+            inst,
+            data ~= nil and (data.doer or data.opener or data.player) or nil
+        )
+    end)
+
+    if inst.components.container ~= nil then
+        local old_onopenfn = inst.components.container.onopenfn
+        inst.components.container.onopenfn = function(inst, ...)
+            AddSunkenTreasureAdvancedBlueprints(inst, select(1, ...))
+            if old_onopenfn ~= nil then
+                return old_onopenfn(inst, ...)
+            end
+        end
+    end
 end)
 
 AddPrefabPostInit("pirate_stash", function(inst)
@@ -1913,7 +2103,7 @@ AddPrefabPostInit("pirate_stash", function(inst)
     if inst.components.workable ~= nil then
         local old_onfinish = inst.components.workable.onfinish
         inst.components.workable:SetOnFinishCallback(function(inst, worker, ...)
-            AddPirateTreasureAdvancedBlueprint(inst)
+            AddPirateTreasureAdvancedBlueprint(inst, worker)
             if old_onfinish ~= nil then
                 return old_onfinish(inst, worker, ...)
             end
@@ -1999,7 +2189,7 @@ local function GetPlayerFromBlueprintDropSource(source)
     return nil
 end
 
-local function GetPrimeMateBlueprintDropCharacter(inst, data)
+local function GetPrimeMateBlueprintDropPlayer(inst, data)
     local player = data ~= nil
         and GetPlayerFromBlueprintDropSource(data.afflicter)
         or nil
@@ -2011,9 +2201,7 @@ local function GetPrimeMateBlueprintDropCharacter(inst, data)
             or nil
     end
 
-    return player ~= nil
-        and player.prefab
-        or nil
+    return player
 end
 
 local function MakeCharacterBlueprintFilter(character)
@@ -2023,23 +2211,20 @@ local function MakeCharacterBlueprintFilter(character)
 end
 
 local function DropPrimeMateSkillTreeNodeBlueprint(inst, data)
-    local character = GetPrimeMateBlueprintDropCharacter(inst, data)
-    if character ~= nil then
-        DropRandomSkillTreeNodeBlueprint(inst, MakeCharacterBlueprintFilter(character))
+    local player = GetPrimeMateBlueprintDropPlayer(inst, data)
+    if player == nil then
         return
     end
 
-    DropRandomSkillTreeNodeBlueprint(inst, IsCharacterActiveForBlueprintPool)
+    DropRandomSkillTreeNodeBlueprint(
+        inst,
+        MakeCharacterBlueprintFilter(player.prefab)
+    )
 end
 
 local function TryDropRandomBlueprints(inst)
     if math.random() < tumbleweed_blueprint_chance then
         DropRandomBlueprint(inst)
-    end
-
-    if IsSkillTreeNodeBlueprintDropEnabled()
-        and math.random() < tumbleweed_blueprint_chance then
-        DropRandomSkillTreeNodeBlueprint(inst)
     end
 end
 
