@@ -101,6 +101,16 @@ local tumbleweed_blueprint_chance = math.max(
     0.01
 )
 
+local BLUEPRINT_TIER_BASIC = "basic"
+local BLUEPRINT_TIER_INTERMEDIATE = "intermediate"
+local BLUEPRINT_TIER_ADVANCED = "advanced"
+
+local TUMBLEWEED_BLUEPRINT_TIER_WEIGHTS = {
+    { tier = BLUEPRINT_TIER_BASIC, weight = 0.42 },
+    { tier = BLUEPRINT_TIER_INTERMEDIATE, weight = 0.48 },
+    { tier = BLUEPRINT_TIER_ADVANCED, weight = 0.10 },
+}
+
 local function RequiresTechnology(level)
     if level == nil then
         return false
@@ -1495,6 +1505,90 @@ local function GetTumbleweedBlueprintRecipes()
     return candidates
 end
 
+local function GetMaximumTechnologyLevel(level)
+    local max_level = 0
+
+    if level ~= nil then
+        for _, required_level in pairs(level) do
+            if type(required_level) == "number"
+                and required_level > max_level
+                and required_level < 10 then
+                max_level = required_level
+            end
+        end
+    end
+
+    return max_level
+end
+
+local function GetBlueprintPoolTier(recipe)
+    local original_level = recipe ~= nil
+        and (recipe._blueprint_only_locked
+            and recipe._blueprint_only_original_level
+            or recipe.level)
+        or nil
+
+    if GetOptionalStationTechnologyEnabled(original_level) ~= nil then
+        return BLUEPRINT_TIER_ADVANCED
+    end
+
+    local max_level = GetMaximumTechnologyLevel(original_level)
+    if max_level <= 1 then
+        return BLUEPRINT_TIER_BASIC
+    elseif max_level == 2 then
+        return BLUEPRINT_TIER_INTERMEDIATE
+    end
+
+    return BLUEPRINT_TIER_ADVANCED
+end
+
+local function SelectTieredBlueprintRecipe(candidates)
+    if candidates == nil or #candidates == 0 then
+        return nil
+    end
+
+    local tiered_candidates = {
+        [BLUEPRINT_TIER_BASIC] = {},
+        [BLUEPRINT_TIER_INTERMEDIATE] = {},
+        [BLUEPRINT_TIER_ADVANCED] = {},
+    }
+
+    for _, recipe in ipairs(candidates) do
+        local tier = GetBlueprintPoolTier(recipe)
+        tiered_candidates[tier][#tiered_candidates[tier] + 1] = recipe
+    end
+
+    local available_tiers = {}
+    local total_weight = 0
+    for _, tier_data in ipairs(TUMBLEWEED_BLUEPRINT_TIER_WEIGHTS) do
+        if #tiered_candidates[tier_data.tier] > 0 then
+            available_tiers[#available_tiers + 1] = tier_data
+            total_weight = total_weight + tier_data.weight
+        end
+    end
+
+    if total_weight <= 0 then
+        return candidates[math.random(#candidates)]
+    end
+
+    local roll = math.random() * total_weight
+    for _, tier_data in ipairs(available_tiers) do
+        roll = roll - tier_data.weight
+        if roll <= 0 then
+            local tier_candidates = tiered_candidates[tier_data.tier]
+            return tier_candidates[math.random(#tier_candidates)]
+        end
+    end
+
+    local fallback_candidates =
+        tiered_candidates[available_tiers[#available_tiers].tier]
+    return fallback_candidates[math.random(#fallback_candidates)]
+end
+
+local function SelectTumbleweedBlueprintRecipe()
+    return SelectTieredBlueprintRecipe(GetTumbleweedBlueprintRecipes())
+end
+
 local function IsAdvancedBlueprintPoolRecipe(recipe)
     if recipe == nil then
         return false
@@ -1909,7 +2003,7 @@ local function RepairInvalidBlueprint(blueprint)
         return
     end
 
-    local recipe = candidates[math.random(#candidates)]
+    local recipe = SelectTieredBlueprintRecipe(candidates)
     ConfigureBlueprint(blueprint, recipe)
 end
 
@@ -2112,12 +2206,11 @@ AddPrefabPostInit("pirate_stash", function(inst)
 end)
 
 local function DropRandomBlueprint(inst)
-    local candidates = GetTumbleweedBlueprintRecipes()
-    if #candidates == 0 then
+    local recipe = SelectTumbleweedBlueprintRecipe()
+    if recipe == nil then
         return
     end
 
-    local recipe = candidates[math.random(#candidates)]
     local blueprint = GLOBAL.SpawnPrefab("blueprint")
     if blueprint == nil then
         return
