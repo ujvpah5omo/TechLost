@@ -133,10 +133,29 @@ local function IsNativeLostTechnology(level)
             and level.ANCIENT == 10)
 end
 
+local GetRecipeOwnerCharacter
+local IsCharacterTechnologyRecipeEnabled
+
+local function IsSkillTreeRecipeEnabled(recipe, level)
+    return include_skill_tree_recipes
+        and recipe ~= nil
+        and recipe.builder_skill ~= nil
+        and not IsNativeLostTechnology(level)
+end
+
 local function RequiresBlueprintLearning(recipe, level)
-    return not IsNativeLostTechnology(level)
-        and (RequiresTechnology(level)
-            or (include_skill_tree_recipes and recipe.builder_skill ~= nil))
+    if IsNativeLostTechnology(level) then
+        return false
+    elseif RequiresTechnology(level) then
+        local owner = GetRecipeOwnerCharacter ~= nil
+            and GetRecipeOwnerCharacter(recipe)
+            or nil
+        return owner == nil
+            or IsSkillTreeRecipeEnabled(recipe, level)
+            or IsCharacterTechnologyRecipeEnabled(recipe, level)
+    end
+
+    return IsSkillTreeRecipeEnabled(recipe, level)
 end
 
 local function IsSkillTreeTechnologyRecipe(recipe, level)
@@ -183,7 +202,7 @@ local function GetSkillOwnerCharacter(skill)
     return nil
 end
 
-local function GetRecipeOwnerCharacter(recipe)
+function GetRecipeOwnerCharacter(recipe)
     if recipe == nil then
         return nil
     end
@@ -235,19 +254,16 @@ local function GetRewardCharacter(player)
     return player.prefab
 end
 
-local function IsCharacterTagRecipeEnabled(recipe, level)
+function IsCharacterTechnologyRecipeEnabled(recipe, level)
     if not include_character_tag_recipes
         or recipe == nil
-        or recipe.builder_tag == nil
-        or recipe.builder_skill ~= nil
         or not RequiresTechnology(level)
         or IsNativeLostTechnology(level) then
         return false
     end
 
-    return IsSelectableCharacter(
-        CHARACTER_RECIPE_TAG_OWNERS[recipe.builder_tag]
-    )
+    local owner = GetRecipeOwnerCharacter(recipe)
+    return owner ~= nil and IsSelectableCharacter(owner)
 end
 
 local function GetOptionalStationTechnologyEnabled(level)
@@ -447,16 +463,10 @@ local function IsBlueprintCompatible(recipe, original_level)
         or recipe.level
     local optional_station_tech_enabled =
         GetOptionalStationTechnologyEnabled(recipe_level)
-    local skill_tree_technology_recipe =
-        IsSkillTreeTechnologyRecipe(recipe, recipe_level)
     local skill_tree_recipe_enabled =
-        include_skill_tree_recipes
-        and recipe.builder_skill ~= nil
-        and not skill_tree_technology_recipe
-    local skill_tree_technology_recipe_enabled =
-        not include_skill_tree_recipes and skill_tree_technology_recipe
-    local character_tag_recipe_enabled =
-        IsCharacterTagRecipeEnabled(recipe, recipe_level)
+        IsSkillTreeRecipeEnabled(recipe, recipe_level)
+    local character_technology_recipe_enabled =
+        IsCharacterTechnologyRecipeEnabled(recipe, recipe_level)
 
     if IsProgressionStationKitRecipe(recipe)
         or IsInactiveSpecialEventTechnology(recipe_level)
@@ -464,12 +474,13 @@ local function IsBlueprintCompatible(recipe, original_level)
         or (recipe.nounlock
             and optional_station_tech_enabled ~= true
             and not skill_tree_recipe_enabled
-            and not skill_tree_technology_recipe_enabled
-            and not character_tag_recipe_enabled)
-        or (recipe.builder_tag ~= nil and not character_tag_recipe_enabled)
+            and not character_technology_recipe_enabled)
+        or (recipe.builder_tag ~= nil
+            and not skill_tree_recipe_enabled
+            and not character_technology_recipe_enabled)
         or (recipe.builder_skill ~= nil
             and not skill_tree_recipe_enabled
-            and not skill_tree_technology_recipe_enabled)
+            and not character_technology_recipe_enabled)
         or recipe.noblueprint
         or recipe.no_blueprint
         or type(recipe.name) ~= "string" then
@@ -629,12 +640,8 @@ local function MakeRecipeBlueprintOnly(recipe)
         recipe._blueprint_only_original_level = recipe.level
         if recipe.nounlock
             and (GetOptionalStationTechnologyEnabled(recipe.level) == true
-                or (include_skill_tree_recipes
-                    and recipe.builder_skill ~= nil
-                    and not IsSkillTreeTechnologyRecipe(recipe, recipe.level))
-                or (not include_skill_tree_recipes
-                    and IsSkillTreeTechnologyRecipe(recipe, recipe.level))
-                or IsCharacterTagRecipeEnabled(recipe, recipe.level)) then
+                or IsSkillTreeRecipeEnabled(recipe, recipe.level)
+                or IsCharacterTechnologyRecipeEnabled(recipe, recipe.level)) then
             recipe._blueprint_only_original_nounlock = recipe.nounlock
             recipe.nounlock = false
         end
@@ -1599,8 +1606,8 @@ local function IsAdvancedBlueprintPoolRecipe(recipe)
         or recipe.level
     return IsBlueprintPoolRecipe(recipe)
         and (GetOptionalStationTechnologyEnabled(original_level) ~= nil
-            or IsCharacterTagRecipeEnabled(recipe, original_level)
-            or IsSkillTreeTechnologyRecipe(recipe, original_level))
+            or IsCharacterTechnologyRecipeEnabled(recipe, original_level)
+            or IsSkillTreeRecipeEnabled(recipe, original_level))
 end
 
 local function GetAdvancedBlueprintRecipes(character)
