@@ -1747,6 +1747,24 @@ if AddPlayerPostInit ~= nil then
     end)
 end
 
+local function SetBlueprintDisplayName(blueprint, recipe)
+    if blueprint == nil
+        or recipe == nil
+        or blueprint.components.named == nil then
+        return
+    end
+
+    local product_name =
+        GLOBAL.STRINGS.NAMES[string.upper(recipe.name)] or recipe.name
+    local blueprint_name = GLOBAL.STRINGS.NAMES.BLUEPRINT or "Blueprint"
+    local name = product_name .. " " .. blueprint_name
+    local owner = GetRecipeOwnerCharacter(recipe)
+    if owner ~= nil then
+        name = GetCharacterDisplayName(owner) .. " - " .. name
+    end
+    blueprint.components.named:SetName(name)
+end
+
 local function ConfigureBlueprint(blueprint, recipe)
     if blueprint == nil or recipe == nil or blueprint.components.teacher == nil then
         return false
@@ -1754,18 +1772,7 @@ local function ConfigureBlueprint(blueprint, recipe)
 
     blueprint.recipetouse = recipe.name
     blueprint.components.teacher:SetRecipe(recipe.name)
-
-    local product_name =
-        GLOBAL.STRINGS.NAMES[string.upper(recipe.name)] or recipe.name
-    local blueprint_name = GLOBAL.STRINGS.NAMES.BLUEPRINT or "Blueprint"
-    if blueprint.components.named ~= nil then
-        local name = product_name .. " " .. blueprint_name
-        local owner = GetRecipeOwnerCharacter(recipe)
-        if owner ~= nil then
-            name = GetCharacterDisplayName(owner) .. " - " .. name
-        end
-        blueprint.components.named:SetName(name)
-    end
+    SetBlueprintDisplayName(blueprint, recipe)
 
     if IsBlueprintPoolRecipe(recipe) then
         blueprint._techlost_blueprint_pool_generated = true
@@ -1987,13 +1994,19 @@ local function RepairInvalidBlueprint(blueprint)
 
     if blueprint.recipetouse ~= "unknown"
         and IsBlueprintPoolRecipe(current_recipe) then
-        return
+        if blueprint._techlost_blueprint_pool_generated then
+            SetBlueprintDisplayName(blueprint, current_recipe)
+            return
+        elseif IsRecipeActiveForBlueprintPool(current_recipe) then
+            return
+        end
     end
 
     local candidates = GetTumbleweedBlueprintRecipes()
     if #candidates == 0 then
         for _, recipe in pairs(GLOBAL.AllRecipes) do
-            if IsBlueprintPoolRecipe(recipe) then
+            if IsBlueprintPoolRecipe(recipe)
+                and IsRecipeActiveForBlueprintPool(recipe) then
                 candidates[#candidates + 1] = recipe
             end
         end
