@@ -25,8 +25,16 @@ configuration_options =
         hover = "开启后，技能树制作配方会进入高级蓝图池，包括需要科技站的技能树配方；沉底宝箱按开启者角色筛选，海盗宝藏按挖开者角色筛选，月亮/暗影线技能蓝图需要对应裂隙开启。",
         options =
         {
-            { description = "关闭", data = false },
-            { description = "开启", data = true },
+            {
+                description = "关闭",
+                data = false,
+                hover = "技能树制作配方按原版方式使用，不额外加入蓝图池。",
+            },
+            {
+                description = "开启",
+                data = true,
+                hover = "技能树制作配方需要先学习蓝图；角色相关奖励按触发者角色筛选。",
+            },
         },
         default = false,
     },
@@ -36,9 +44,21 @@ configuration_options =
         hover = "开启后，技能树节点需要消耗技能许可点，再按原版技能点和前置条件手动点亮；许可点蓝图不进入普通蓝图池，只由海盗猴首领大副按击杀者角色掉落，不回退其他角色，可重复掉落保存。月后影后模式下，可提前获得许可点但双裂隙前不能点亮。换角色会重置未使用许可点，点亮消耗不返还。",
         options =
         {
-            { description = "关闭", data = false },
-            { description = "开启", data = "enabled" },
-            { description = "月后影后", data = "after_both_rifts" },
+            {
+                description = "关闭",
+                data = false,
+                hover = "技能树节点按原版方式点亮，不需要技能许可点。",
+            },
+            {
+                description = "开启",
+                data = "enabled",
+                hover = "技能树节点需要技能许可点；许可点蓝图只由海盗猴首领大副按击杀者角色掉落。",
+            },
+            {
+                description = "月后影后",
+                data = "after_both_rifts",
+                hover = "可以提前获得许可点，但月亮裂隙和暗影裂隙都开启前不能点亮受控技能。",
+            },
         },
         default = false,
     },
@@ -48,8 +68,16 @@ configuration_options =
         hover = "开启后，需要科技站的角色专属配方会进入高级蓝图池，包括角色标签配方和技能树科技配方；沉底宝箱按开启者角色筛选，海盗宝藏按挖开者角色筛选。只有对应角色能学习，禁用角色的配方不会进入蓝图池。",
         options =
         {
-            { description = "关闭", data = false },
-            { description = "开启", data = true },
+            {
+                description = "关闭",
+                data = false,
+                hover = "需要科技站的角色专属配方按原版方式使用，不额外加入高级蓝图池。",
+            },
+            {
+                description = "开启",
+                data = true,
+                hover = "需要科技站的角色专属配方进入高级蓝图池，并按开启宝箱或挖宝玩家的角色筛选。",
+            },
         },
         default = false,
     },
