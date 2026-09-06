@@ -7,14 +7,18 @@ local skilltree_defs = GLOBAL.require ~= nil
 local include_ancient_tech = GetModConfigData("include_ancient_tech") == true
 local include_lunar_forge_tech = GetModConfigData("include_lunar_forge_tech") == true
 local include_shadow_forge_tech = GetModConfigData("include_shadow_forge_tech") == true
-local include_skill_tree_recipes =
-    GetModConfigData("include_skill_tree_recipes") == true
 local skill_tree_node_blueprint_mode =
     GetModConfigData("include_skill_tree_node_blueprints")
+local disable_skill_tree =
+    skill_tree_node_blueprint_mode == "disable_skill_tree"
+local include_skill_tree_recipes =
+    not disable_skill_tree
+    and GetModConfigData("include_skill_tree_recipes") == true
 local include_skill_tree_node_blueprints =
-    skill_tree_node_blueprint_mode == true
-    or skill_tree_node_blueprint_mode == "enabled"
-    or skill_tree_node_blueprint_mode == "after_both_rifts"
+    not disable_skill_tree
+    and (skill_tree_node_blueprint_mode == true
+        or skill_tree_node_blueprint_mode == "enabled"
+        or skill_tree_node_blueprint_mode == "after_both_rifts")
 local include_character_tag_recipes =
     GetModConfigData("include_character_tag_recipes") == true
 local include_powder_monkey_blueprints =
@@ -29,7 +33,9 @@ local pirate_treasure_advanced_blueprint_chance =
 
 local SKILL_TREE_BLUEPRINT_REQUIRED_MESSAGE = "需要先学习技能许可蓝图"
 local SKILL_TREE_RIFT_REQUIRED_MESSAGE = "需要月亮裂隙和暗影裂隙都开启"
+local SKILL_TREE_DISABLED_MESSAGE = "技能树已禁用"
 local SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE = "未满足许可条件的技能已被取消"
+local SKILL_TREE_DISABLED_REMOVED_MESSAGE = "已清理禁用的技能树节点"
 
 local CHARACTER_RECIPE_TAG_OWNERS = {
     pyromaniac = "willow",
@@ -111,6 +117,16 @@ local TUMBLEWEED_BLUEPRINT_TIER_WEIGHTS = {
     { tier = BLUEPRINT_TIER_ADVANCED, weight = 0.10 },
 }
 
+local disabled_skill_tree_characters = {}
+if disable_skill_tree
+    and skilltree_defs ~= nil
+    and skilltree_defs.SKILLTREE_DEFS ~= nil then
+    for character in pairs(skilltree_defs.SKILLTREE_DEFS) do
+        disabled_skill_tree_characters[character] = true
+        skilltree_defs.SKILLTREE_DEFS[character] = nil
+    end
+end
+
 local function RequiresTechnology(level)
     if level == nil then
         return false
@@ -135,12 +151,20 @@ end
 
 local GetRecipeOwnerCharacter
 local IsCharacterTechnologyRecipeEnabled
+local IsBuilderSkillAvailable
 
 local function IsSkillTreeRecipeEnabled(recipe, level)
     return include_skill_tree_recipes
         and recipe ~= nil
         and recipe.builder_skill ~= nil
+        and IsBuilderSkillAvailable(recipe.builder_skill)
         and not IsNativeLostTechnology(level)
+end
+
+local function IsDisabledSkillTreeRecipe(recipe)
+    return disable_skill_tree
+        and recipe ~= nil
+        and recipe.builder_skill ~= nil
 end
 
 local function RequiresBlueprintLearning(recipe, level)
@@ -161,6 +185,7 @@ end
 local function IsSkillTreeTechnologyRecipe(recipe, level)
     return recipe ~= nil
         and recipe.builder_skill ~= nil
+        and IsBuilderSkillAvailable(recipe.builder_skill)
         and RequiresTechnology(level)
         and not IsNativeLostTechnology(level)
 end
@@ -254,9 +279,38 @@ local function GetRewardCharacter(player)
     return player.prefab
 end
 
+local function IsSkillTreeDisabledForCharacter(character)
+    return disable_skill_tree
+        and type(character) == "string"
+        and (disabled_skill_tree_characters[character] == true
+            or IsSelectableCharacter(character))
+end
+
+local function IsSkillTreeAvailableForCharacter(character)
+    local skill_defs = skilltree_defs ~= nil
+        and skilltree_defs.SKILLTREE_DEFS
+        or nil
+    return not IsSkillTreeDisabledForCharacter(character)
+        and type(character) == "string"
+        and type(skill_defs) == "table"
+        and type(skill_defs[character]) == "table"
+end
+
+function IsBuilderSkillAvailable(skill)
+    return GetSkillOwnerCharacter(skill) ~= nil
+end
+
+local function IsUnavailableSkillTreeRecipe(recipe)
+    return recipe ~= nil
+        and recipe.builder_skill ~= nil
+        and (IsDisabledSkillTreeRecipe(recipe)
+            or not IsBuilderSkillAvailable(recipe.builder_skill))
+end
+
 function IsCharacterTechnologyRecipeEnabled(recipe, level)
     if not include_character_tag_recipes
         or recipe == nil
+        or IsUnavailableSkillTreeRecipe(recipe)
         or not RequiresTechnology(level)
         or IsNativeLostTechnology(level) then
         return false
@@ -781,14 +835,23 @@ local function GetSkillData(character, skill)
         or nil
 end
 
-local function IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
-    return IsSkillTreeNodeBlueprintControlEnabled()
-        and type(character) == "string"
+local function IsSkillTreeNode(character, skill, skill_data)
+    return type(character) == "string"
         and type(skill) == "string"
         and type(skill_data) == "table"
         and IsSelectableCharacter(character)
         and skill_data.rpc_id ~= nil
         and skill_data.infographic == nil
+end
+
+local function IsSkillTreeNodeDisabled(character, skill, skill_data)
+    return IsSkillTreeDisabledForCharacter(character)
+        and type(skill) == "string"
+end
+
+local function IsSkillTreeNodeBlueprintControlled(character, skill, skill_data)
+    return IsSkillTreeNodeBlueprintControlEnabled()
+        and IsSkillTreeNode(character, skill, skill_data)
 end
 
 local function IsSkillTreeNodeBlueprintUnlocked(updater, character, skill)
@@ -922,10 +985,20 @@ local function SaySkillTreeRiftRequired(inst)
     )
 end
 
+local function SaySkillTreeDisabled(inst)
+    SayWithCooldown(
+        inst,
+        SKILL_TREE_DISABLED_MESSAGE,
+        "_techlost_last_skill_disabled_hint_time"
+    )
+end
+
 local function SayUnauthorizedSkillTreeNodesRemoved(inst)
     SayWithCooldown(
         inst,
-        SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE,
+        disable_skill_tree
+            and SKILL_TREE_DISABLED_REMOVED_MESSAGE
+            or SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE,
         "_techlost_last_skill_blueprint_removed_time"
     )
 end
@@ -935,6 +1008,7 @@ local function CanLearnSkillTreeBlueprint(target, character)
     if updater == nil
         or target.prefab ~= character
         or not IsSkillTreeNodeBlueprintControlEnabled()
+        or not IsSkillTreeAvailableForCharacter(character)
         or not IsSelectableCharacter(character) then
         return false, "CANTLEARN"
     end
@@ -977,6 +1051,10 @@ AddComponentPostInit("teacher", function(self)
     local old_teach = self.Teach
     self.Teach = function(self, target, ...)
         if self.inst ~= nil and self.inst._techlost_skill_blueprint then
+            if disable_skill_tree then
+                return false, "CANTLEARN"
+            end
+
             local success, reason = UnlockSkillFromBlueprint(
                 target,
                 self.inst._techlost_skill_blueprint_character
@@ -1005,6 +1083,10 @@ AddComponentPostInit("builder", function(self)
     local old_knows_recipe = self.KnowsRecipe
     self.KnowsRecipe = function(self, recipe, ...)
         local recipe_data = ResolveRecipe(recipe)
+        if IsUnavailableSkillTreeRecipe(recipe_data) then
+            return false
+        end
+
         if IsStationBoundBlueprintRecipe(recipe_data)
             and not IsAtOriginalTechStation(self, recipe_data) then
             return false
@@ -1024,6 +1106,10 @@ AddComponentPostInit("builder", function(self)
     local old_do_build = self.DoBuild
     self.DoBuild = function(self, recname, ...)
         local recipe = recname ~= nil and GLOBAL.AllRecipes[recname] or nil
+        if IsUnavailableSkillTreeRecipe(recipe) then
+            return false
+        end
+
         if IsStationBoundBlueprintRecipe(recipe)
             and not self:IsBuildBuffered(recname)
             and not IsAtOriginalTechStation(self, recipe) then
@@ -1044,6 +1130,10 @@ AddComponentPostInit("builder", function(self)
     local old_buffer_build = self.BufferBuild
     self.BufferBuild = function(self, recname, ...)
         local recipe = recname ~= nil and GLOBAL.AllRecipes[recname] or nil
+        if IsUnavailableSkillTreeRecipe(recipe) then
+            return false
+        end
+
         local station = self.current_prototyper
         local should_unlock_station = ShouldUnlockStationRecipe(self, recipe)
         local was_buffered = self:IsBuildBuffered(recname)
@@ -1141,6 +1231,10 @@ local function GetSkillTreeNodeActivationBlockReason(
     skill
 )
     local skill_data = GetSkillData(character, skill)
+    if IsSkillTreeNodeDisabled(character, skill, skill_data) then
+        return "DISABLED"
+    end
+
     if not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
         return nil
     end
@@ -1178,6 +1272,10 @@ local function GetExistingSkillTreeNodeActivationBlockReason(
     skill
 )
     local skill_data = GetSkillData(character, skill)
+    if IsSkillTreeNodeDisabled(character, skill, skill_data) then
+        return "DISABLED"
+    end
+
     if not IsSkillTreeNodeBlueprintControlled(character, skill, skill_data) then
         return nil
     end
@@ -1227,7 +1325,8 @@ local function GetBlockedSkillTreeNodeActivation(
     character,
     activated_skills
 )
-    if not IsSkillTreeNodeBlueprintControlEnabled()
+    if ((not disable_skill_tree)
+            and not IsSkillTreeNodeBlueprintControlEnabled())
         or activated_skills == nil then
         return nil
     end
@@ -1258,7 +1357,9 @@ local function ValidateCharacterDataWithBlueprintSkillUnlocks(
     )
     if blocked_skill ~= nil then
         if not updater._techlost_suppress_skill_blueprint_hint then
-            if reason == "RIFT" then
+            if reason == "DISABLED" then
+                SaySkillTreeDisabled(updater.inst)
+            elseif reason == "RIFT" then
                 SaySkillTreeRiftRequired(updater.inst)
             else
                 SaySkillTreeBlueprintRequired(updater.inst)
@@ -1271,7 +1372,8 @@ local function ValidateCharacterDataWithBlueprintSkillUnlocks(
 end
 
 local function RemoveUnauthorizedSkillTreeNodeActivations(updater)
-    if not IsSkillTreeNodeBlueprintControlEnabled()
+    if ((not disable_skill_tree)
+            and not IsSkillTreeNodeBlueprintControlEnabled())
         or updater == nil
         or updater.GetActivatedSkills == nil then
         return false
@@ -1332,6 +1434,14 @@ local function DoStrictSkillTreeBlueprintCheck(updater)
 end
 
 AddComponentPostInit("skilltreeupdater", function(self)
+    if disable_skill_tree then
+        local old_add_skill_xp = self.AddSkillXP
+        self.AddSkillXP = function()
+            return
+        end
+        self.techlost_old_AddSkillXP = old_add_skill_xp
+    end
+
     if self.skilltree ~= nil then
         local old_validate_character_data = self.skilltree.ValidateCharacterData
         self.skilltree.ValidateCharacterData = function(skilltree, character, activated_skills, skill_xp, ...)
@@ -1371,7 +1481,9 @@ AddComponentPostInit("skilltreeupdater", function(self)
             skill
         )
         if reason ~= nil then
-            if reason == "RIFT" then
+            if reason == "DISABLED" then
+                SaySkillTreeDisabled(self.inst)
+            elseif reason == "RIFT" then
                 SaySkillTreeRiftRequired(self.inst)
             else
                 SaySkillTreeBlueprintRequired(self.inst)
@@ -1400,6 +1512,15 @@ AddComponentPostInit("skilltreeupdater", function(self)
     local old_onsave = self.OnSave
     self.OnSave = function(self, ...)
         local data = old_onsave ~= nil and old_onsave(self, ...) or nil
+        if disable_skill_tree then
+            if data ~= nil then
+                data.techlost_blueprint_skill_unlocks = nil
+                data.techlost_blueprint_skills = nil
+                data.techlost_skill_permit_points = nil
+            end
+            return data
+        end
+
         local skill_unlocks =
             CopyBlueprintSkillUnlocks(self._techlost_blueprint_skill_unlocks)
         if skill_unlocks ~= nil then
@@ -1421,6 +1542,13 @@ AddComponentPostInit("skilltreeupdater", function(self)
         if old_onload ~= nil then
             old_onload(self, data, ...)
         end
+        if disable_skill_tree then
+            self._techlost_blueprint_skill_unlocks = nil
+            self._techlost_skill_permit_points = nil
+            DoStrictSkillTreeBlueprintCheck(self)
+            return
+        end
+
         self._techlost_blueprint_skill_unlocks = data ~= nil
             and MergeBlueprintSkillUnlocks(
                 data.techlost_blueprint_skill_unlocks,
@@ -1443,6 +1571,13 @@ AddComponentPostInit("skilltreeupdater", function(self)
             and newinst.components ~= nil
             and newinst.components.skilltreeupdater ~= nil then
             local new_updater = newinst.components.skilltreeupdater
+            if disable_skill_tree then
+                new_updater._techlost_blueprint_skill_unlocks = nil
+                new_updater._techlost_skill_permit_points = nil
+                DoStrictSkillTreeBlueprintCheck(new_updater)
+                return
+            end
+
             new_updater._techlost_blueprint_skill_unlocks =
                 CopyBlueprintSkillUnlocks(
                     self._techlost_blueprint_skill_unlocks
@@ -1463,6 +1598,10 @@ if AddClassPostConstruct ~= nil then
         local old_knows_recipe = self.KnowsRecipe
         self.KnowsRecipe = function(self, recipe, ...)
             local recipe_data = ResolveRecipe(recipe)
+            if IsUnavailableSkillTreeRecipe(recipe_data) then
+                return false
+            end
+
             if IsStationBoundBlueprintRecipe(recipe_data)
                 and not IsReplicaAtOriginalTechStation(self, recipe_data) then
                 return false
@@ -1981,6 +2120,11 @@ end
 
 local function RepairInvalidBlueprint(blueprint)
     if blueprint._techlost_skill_blueprint then
+        if not IsSkillTreeAvailableForCharacter(
+            blueprint._techlost_skill_blueprint_character
+        ) then
+            blueprint:Remove()
+        end
         return
     end
 
@@ -2137,6 +2281,13 @@ AddPrefabPostInit("blueprint", function(inst)
             inst._techlost_skill_blueprint_skill =
                 data.techlost_skill_blueprint_skill or nil
             if inst._techlost_skill_blueprint then
+                if not IsSkillTreeAvailableForCharacter(
+                    inst._techlost_skill_blueprint_character
+                ) then
+                    inst:Remove()
+                    return
+                end
+
                 inst.recipetouse = nil
                 if inst.components.teacher ~= nil then
                     inst.components.teacher:SetRecipe(nil)
