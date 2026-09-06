@@ -2131,9 +2131,7 @@ end
 local function AddSunkenTreasureAdvancedBlueprints(sunken_chest, opener)
     if sunken_treasure_advanced_blueprint_chance <= 0
         or sunken_chest == nil
-        or sunken_chest._techlost_advanced_blueprints_checked
-        or (sunken_chest.GetCurrentPlatform ~= nil
-            and sunken_chest:GetCurrentPlatform() ~= nil) then
+        or sunken_chest._techlost_advanced_blueprints_checked then
         return
     end
 
@@ -2385,19 +2383,22 @@ AddPrefabPostInit("sunkenchest", function(inst)
     end
 
     inst:ListenForEvent("onopen", function(inst, data)
-        AddSunkenTreasureAdvancedBlueprints(
-            inst,
-            data ~= nil and (data.doer or data.opener or data.player) or nil
-        )
+        local opener = data ~= nil and (data.doer or data.opener or data.player) or nil
+        inst:DoTaskInTime(0, function(inst)
+            AddSunkenTreasureAdvancedBlueprints(inst, opener)
+        end)
     end)
 
     if inst.components.container ~= nil then
         local old_onopenfn = inst.components.container.onopenfn
         inst.components.container.onopenfn = function(inst, ...)
-            AddSunkenTreasureAdvancedBlueprints(inst, select(1, ...))
+            local opener = select(1, ...)
+            local result = nil
             if old_onopenfn ~= nil then
-                return old_onopenfn(inst, ...)
+                result = old_onopenfn(inst, ...)
             end
+            AddSunkenTreasureAdvancedBlueprints(inst, opener)
+            return result
         end
     end
 end)
@@ -2468,23 +2469,70 @@ local function DropRandomSkillTreeNodeBlueprint(inst, character_filter)
     blueprint.Transform:SetPosition(inst.Transform:GetWorldPosition())
 end
 
+local function IsPlayerEntity(inst)
+    return inst ~= nil
+        and inst.HasTag ~= nil
+        and inst:HasTag("player")
+end
+
+local function GetPlayerFromLinkedEntity(link)
+    if IsPlayerEntity(link) then
+        return link
+    end
+
+    if link ~= nil and link.value ~= nil then
+        local pcall_fn = GLOBAL.pcall or pcall
+        local ok, value = pcall_fn(function()
+            return link:value()
+        end)
+        if ok and IsPlayerEntity(value) then
+            return value
+        end
+    end
+
+    return nil
+end
+
 local function GetPlayerFromBlueprintDropSource(source)
     if source == nil then
         return nil
     end
 
-    if source.HasTag ~= nil and source:HasTag("player") then
+    if IsPlayerEntity(source) then
         return source
+    end
+
+    for _, key in ipairs({
+        "_playerlink",
+        "playerlink",
+        "player",
+        "_player",
+        "owner",
+        "_owner",
+        "link",
+        "_link",
+    }) do
+        local player = GetPlayerFromLinkedEntity(source[key])
+        if player ~= nil then
+            return player
+        end
     end
 
     local inventory_owner = source.components ~= nil
         and source.components.inventoryitem ~= nil
         and source.components.inventoryitem.owner
         or nil
-    if inventory_owner ~= nil
-        and inventory_owner.HasTag ~= nil
-        and inventory_owner:HasTag("player") then
+    if IsPlayerEntity(inventory_owner) then
         return inventory_owner
+    end
+
+    local grand_owner = source.components ~= nil
+        and source.components.inventoryitem ~= nil
+        and source.components.inventoryitem.GetGrandOwner ~= nil
+        and source.components.inventoryitem:GetGrandOwner()
+        or nil
+    if IsPlayerEntity(grand_owner) then
+        return grand_owner
     end
 
     local leader = source.components ~= nil
@@ -2492,20 +2540,38 @@ local function GetPlayerFromBlueprintDropSource(source)
         and source.components.follower.GetLeader ~= nil
         and source.components.follower:GetLeader()
         or nil
-    if leader ~= nil
-        and leader.HasTag ~= nil
-        and leader:HasTag("player") then
+    if IsPlayerEntity(leader) then
         return leader
     end
 
     local owner = source.owner
-    if owner ~= nil
-        and owner.HasTag ~= nil
-        and owner:HasTag("player") then
+    if IsPlayerEntity(owner) then
         return owner
     end
 
     return nil
+end
+
+local function RememberBlueprintDropPlayer(inst, source)
+    local player = GetPlayerFromBlueprintDropSource(source)
+    if player ~= nil then
+        inst._techlost_blueprint_drop_player = player
+    end
+end
+
+local function RememberBlueprintDropPlayerFromCombat(inst)
+    local combat = inst ~= nil
+        and inst.components ~= nil
+        and inst.components.combat
+        or nil
+    if combat == nil then
+        return
+    end
+
+    RememberBlueprintDropPlayer(inst, combat.lastattacker)
+    if inst._techlost_blueprint_drop_player == nil then
+        RememberBlueprintDropPlayer(inst, combat.target)
+    end
 end
 
 local function GetPrimeMateBlueprintDropPlayer(inst, data)
@@ -2520,6 +2586,11 @@ local function GetPrimeMateBlueprintDropPlayer(inst, data)
             or nil
     end
 
+    if player == nil then
+        RememberBlueprintDropPlayerFromCombat(inst)
+        player = inst._techlost_blueprint_drop_player
+    end
+
     return player
 end
 
@@ -2529,22 +2600,37 @@ local function MakeCharacterBlueprintFilter(character)
     end
 end
 
-local function DropPrimeMateSkillTreeNodeBlueprint(inst, data)
+local function DropPrimeMateSkillTreeNodeBlueprintOnce(inst, data, drop_target)
+    if inst._techlost_skill_blueprint_drop_checked then
+        return
+    end
+
     local player = GetPrimeMateBlueprintDropPlayer(inst, data)
     if player == nil then
         return
     end
 
+    inst._techlost_skill_blueprint_drop_checked = true
     DropRandomSkillTreeNodeBlueprint(
-        inst,
+        drop_target or inst,
         MakeCharacterBlueprintFilter(player.prefab)
     )
 end
 
-local function TryDropRandomBlueprints(inst)
+local function TryDropRandomBlueprints(inst, drop_target)
     if math.random() < tumbleweed_blueprint_chance then
-        DropRandomBlueprint(inst)
+        DropRandomBlueprint(drop_target or inst)
     end
+end
+
+local function TryDropRandomBlueprintsOnce(inst, drop_target, require_player)
+    if inst._techlost_random_blueprint_drop_checked
+        or (require_player and inst._techlost_blueprint_drop_player == nil) then
+        return
+    end
+
+    inst._techlost_random_blueprint_drop_checked = true
+    TryDropRandomBlueprints(inst, drop_target)
 end
 
 AddPrefabPostInit("powder_monkey", function(inst)
@@ -2553,8 +2639,21 @@ AddPrefabPostInit("powder_monkey", function(inst)
         return
     end
 
+    inst:ListenForEvent("attacked", function(inst, data)
+        RememberBlueprintDropPlayer(inst, data ~= nil and data.attacker or nil)
+    end)
+
     inst:ListenForEvent("death", function(inst)
-        TryDropRandomBlueprints(inst)
+        TryDropRandomBlueprintsOnce(inst, inst, false)
+    end)
+
+    inst:ListenForEvent("onremove", function(inst)
+        RememberBlueprintDropPlayerFromCombat(inst)
+        TryDropRandomBlueprintsOnce(
+            inst,
+            inst._techlost_blueprint_drop_player,
+            true
+        )
     end)
 end)
 
@@ -2563,8 +2662,21 @@ AddPrefabPostInit("prime_mate", function(inst)
         return
     end
 
+    inst:ListenForEvent("attacked", function(inst, data)
+        RememberBlueprintDropPlayer(inst, data ~= nil and data.attacker or nil)
+    end)
+
     inst:ListenForEvent("death", function(inst, data)
-        DropPrimeMateSkillTreeNodeBlueprint(inst, data)
+        DropPrimeMateSkillTreeNodeBlueprintOnce(inst, data, inst)
+    end)
+
+    inst:ListenForEvent("onremove", function(inst)
+        RememberBlueprintDropPlayerFromCombat(inst)
+        DropPrimeMateSkillTreeNodeBlueprintOnce(
+            inst,
+            nil,
+            inst._techlost_blueprint_drop_player
+        )
     end)
 end)
 
