@@ -36,6 +36,9 @@ local SKILL_TREE_RIFT_REQUIRED_MESSAGE = "需要月亮裂隙和暗影裂隙都�
 local SKILL_TREE_DISABLED_MESSAGE = "技能树已禁用"
 local SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE = "未满足许可条件的技能已被取消"
 local SKILL_TREE_DISABLED_REMOVED_MESSAGE = "已清理禁用的技能树节点"
+local SKILL_TREE_BLUEPRINT_LEARNED_MESSAGE = "获得 1 个技能许可点"
+local SKILL_TREE_BLUEPRINT_CONSUMED_MESSAGE = "消耗 1 个技能许可点"
+local SKILL_TREE_BLUEPRINT_FULL_MESSAGE = "技能许可点已满"
 
 local CHARACTER_RECIPE_TAG_OWNERS = {
     pyromaniac = "willow",
@@ -969,18 +972,29 @@ local function SayWithCooldown(inst, message, cooldown_key)
     end
 end
 
-local function SaySkillTreeBlueprintRequired(inst)
+local function GetSkillTreePermitPointSuffix(updater, character)
+    if updater == nil or type(character) ~= "string" then
+        return ""
+    end
+
+    return "，当前许可点：" ..
+        tostring(GetSkillTreePermitPoints(updater, character))
+end
+
+local function SaySkillTreeBlueprintRequired(inst, updater, character)
     SayWithCooldown(
         inst,
-        SKILL_TREE_BLUEPRINT_REQUIRED_MESSAGE,
+        SKILL_TREE_BLUEPRINT_REQUIRED_MESSAGE ..
+            GetSkillTreePermitPointSuffix(updater, character),
         "_techlost_last_skill_blueprint_hint_time"
     )
 end
 
-local function SaySkillTreeRiftRequired(inst)
+local function SaySkillTreeRiftRequired(inst, updater, character)
     SayWithCooldown(
         inst,
-        SKILL_TREE_RIFT_REQUIRED_MESSAGE,
+        SKILL_TREE_RIFT_REQUIRED_MESSAGE ..
+            GetSkillTreePermitPointSuffix(updater, character),
         "_techlost_last_skill_rift_hint_time"
     )
 end
@@ -1000,6 +1014,33 @@ local function SayUnauthorizedSkillTreeNodesRemoved(inst)
             and SKILL_TREE_DISABLED_REMOVED_MESSAGE
             or SKILL_TREE_BLUEPRINT_REMOVED_MESSAGE,
         "_techlost_last_skill_blueprint_removed_time"
+    )
+end
+
+local function SaySkillTreePermitPointLearned(inst, updater, character)
+    SayWithCooldown(
+        inst,
+        SKILL_TREE_BLUEPRINT_LEARNED_MESSAGE ..
+            GetSkillTreePermitPointSuffix(updater, character),
+        "_techlost_last_skill_blueprint_learned_time"
+    )
+end
+
+local function SaySkillTreePermitPointConsumed(inst, updater, character)
+    SayWithCooldown(
+        inst,
+        SKILL_TREE_BLUEPRINT_CONSUMED_MESSAGE ..
+            GetSkillTreePermitPointSuffix(updater, character),
+        "_techlost_last_skill_blueprint_consumed_time"
+    )
+end
+
+local function SaySkillTreePermitPointFull(inst, updater, character)
+    SayWithCooldown(
+        inst,
+        SKILL_TREE_BLUEPRINT_FULL_MESSAGE ..
+            GetSkillTreePermitPointSuffix(updater, character),
+        "_techlost_last_skill_blueprint_full_time"
     )
 end
 
@@ -1031,11 +1072,20 @@ end
 local function UnlockSkillFromBlueprint(target, character)
     local can_learn, reason = CanLearnSkillTreeBlueprint(target, character)
     if not can_learn then
+        local updater = GetSkillTreeUpdater(target)
+        if reason == "RIFT" then
+            SaySkillTreeRiftRequired(target, updater, character)
+        elseif reason == "KNOWN" then
+            SaySkillTreePermitPointFull(target, updater, character)
+        elseif reason == "CANTLEARN" then
+            SaySkillTreeBlueprintRequired(target, updater, character)
+        end
         return false, reason
     end
 
     local updater = target.components.skilltreeupdater
     AddSkillTreePermitPoint(updater, character)
+    SaySkillTreePermitPointLearned(target, updater, character)
     return true
 end
 
@@ -1360,9 +1410,9 @@ local function ValidateCharacterDataWithBlueprintSkillUnlocks(
             if reason == "DISABLED" then
                 SaySkillTreeDisabled(updater.inst)
             elseif reason == "RIFT" then
-                SaySkillTreeRiftRequired(updater.inst)
+                SaySkillTreeRiftRequired(updater.inst, updater, character)
             else
-                SaySkillTreeBlueprintRequired(updater.inst)
+                SaySkillTreeBlueprintRequired(updater.inst, updater, character)
             end
         end
         return false
@@ -1484,9 +1534,9 @@ AddComponentPostInit("skilltreeupdater", function(self)
             if reason == "DISABLED" then
                 SaySkillTreeDisabled(self.inst)
             elseif reason == "RIFT" then
-                SaySkillTreeRiftRequired(self.inst)
+                SaySkillTreeRiftRequired(self.inst, self, character)
             else
-                SaySkillTreeBlueprintRequired(self.inst)
+                SaySkillTreeBlueprintRequired(self.inst, self, character)
             end
             return false
         end
@@ -1504,6 +1554,7 @@ AddComponentPostInit("skilltreeupdater", function(self)
         if result and should_consume_permit then
             ConsumeSkillTreePermitPoint(self, character)
             RememberBlueprintSkillUnlock(self, character, skill)
+            SaySkillTreePermitPointConsumed(self.inst, self, character)
         end
 
         return result, activate_reason
@@ -1950,8 +2001,9 @@ local function ConfigureSkillTreeNodeBlueprint(blueprint, candidate)
     blueprint._techlost_skill_blueprint = true
     blueprint._techlost_skill_blueprint_character = candidate.character
     blueprint._techlost_skill_blueprint_skill = nil
-    blueprint._techlost_blueprint_pool_generated = true
-    blueprint._techlost_last_rain_wash_count = GetWorldRainWashCount()
+    blueprint._techlost_blueprint_pool_generated = nil
+    blueprint._techlost_rain_washes = nil
+    blueprint._techlost_last_rain_wash_count = nil
 
     if blueprint.components.named ~= nil then
         blueprint.components.named:SetName(GetSkillTreeNodeBlueprintName(
@@ -2125,6 +2177,9 @@ local function RepairInvalidBlueprint(blueprint)
         ) then
             blueprint:Remove()
         end
+        blueprint._techlost_blueprint_pool_generated = nil
+        blueprint._techlost_rain_washes = nil
+        blueprint._techlost_last_rain_wash_count = nil
         return
     end
 
