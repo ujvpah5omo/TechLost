@@ -2014,6 +2014,18 @@ local function ConfigureSkillTreeNodeBlueprint(blueprint, candidate)
     return true
 end
 
+local function DropItemAtTarget(item, target)
+    if item == nil
+        or item.Transform == nil
+        or target == nil
+        or target.Transform == nil then
+        return false
+    end
+
+    item.Transform:SetPosition(target.Transform:GetWorldPosition())
+    return true
+end
+
 local function GiveAdvancedBlueprint(container_owner, reward_player)
     local candidates =
         GetAdvancedBlueprintRecipes(GetRewardCharacter(reward_player))
@@ -2030,37 +2042,9 @@ local function GiveAdvancedBlueprint(container_owner, reward_player)
         return false
     end
 
-    local container = container_owner ~= nil
-        and container_owner.components ~= nil
-        and container_owner.components.container
-        or nil
-    if container ~= nil then
-        if container:IsFull() then
-            blueprint:Remove()
-            return false
-        end
-        if container:GiveItem(blueprint) ~= nil then
-            return true
-        end
-        blueprint:Remove()
-        return false
-    end
-
-    local inventory = container_owner ~= nil
-        and container_owner.components ~= nil
-        and container_owner.components.inventory
-        or nil
-    if inventory ~= nil then
-        local item_count = GetTableSize(inventory.itemslots)
-        if inventory.maxslots ~= nil and item_count >= inventory.maxslots then
-            blueprint:Remove()
-            return false
-        end
-        if inventory:GiveItem(blueprint) ~= nil then
-            return true
-        end
-        blueprint:Remove()
-        return false
+    if DropItemAtTarget(blueprint, reward_player)
+        or DropItemAtTarget(blueprint, container_owner) then
+        return true
     end
 
     blueprint:Remove()
