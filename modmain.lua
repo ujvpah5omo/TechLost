@@ -2027,7 +2027,8 @@ local function DropItemAtTarget(item, target)
     if item == nil
         or item.Transform == nil
         or target == nil
-        or target.Transform == nil then
+        or target.Transform == nil
+        or (target.IsValid ~= nil and not target:IsValid()) then
         return false
     end
 
@@ -2049,11 +2050,22 @@ local function DropItemAtPosition(item, x, y, z)
 end
 
 local function GetEntityPosition(target)
-    if target == nil or target.Transform == nil then
+    if target == nil
+        or target.Transform == nil
+        or (target.IsValid ~= nil and not target:IsValid()) then
         return nil, nil, nil
     end
 
     return target.Transform:GetWorldPosition()
+end
+
+local function RememberDropPosition(inst)
+    local x, y, z = GetEntityPosition(inst)
+    if x ~= nil and y ~= nil and z ~= nil then
+        inst._techlost_blueprint_drop_x = x
+        inst._techlost_blueprint_drop_y = y
+        inst._techlost_blueprint_drop_z = z
+    end
 end
 
 local function GetNearbyRewardPlayer(target, max_range, fallback_x, fallback_y, fallback_z)
@@ -2624,7 +2636,15 @@ local function DropRandomBlueprint(inst)
     end
 
     ConfigureBlueprint(blueprint, recipe)
-    blueprint.Transform:SetPosition(inst.Transform:GetWorldPosition())
+    if not DropItemAtTarget(blueprint, inst)
+        and not DropItemAtPosition(
+            blueprint,
+            inst._techlost_blueprint_drop_x,
+            inst._techlost_blueprint_drop_y,
+            inst._techlost_blueprint_drop_z
+        ) then
+        blueprint:Remove()
+    end
 end
 
 local function DropRandomSkillTreeNodeBlueprint(inst, character_filter)
@@ -2646,7 +2666,15 @@ local function DropRandomSkillTreeNodeBlueprint(inst, character_filter)
         return
     end
 
-    blueprint.Transform:SetPosition(inst.Transform:GetWorldPosition())
+    if not DropItemAtTarget(blueprint, inst)
+        and not DropItemAtPosition(
+            blueprint,
+            inst._techlost_blueprint_drop_x,
+            inst._techlost_blueprint_drop_y,
+            inst._techlost_blueprint_drop_z
+        ) then
+        blueprint:Remove()
+    end
 end
 
 local function IsPlayerEntity(inst)
@@ -2820,18 +2848,21 @@ AddPrefabPostInit("powder_monkey", function(inst)
     end
 
     inst:ListenForEvent("attacked", function(inst, data)
+        RememberDropPosition(inst)
         RememberBlueprintDropPlayer(inst, data ~= nil and data.attacker or nil)
     end)
 
     inst:ListenForEvent("death", function(inst)
+        RememberDropPosition(inst)
         TryDropRandomBlueprintsOnce(inst, inst, false)
     end)
 
     inst:ListenForEvent("onremove", function(inst)
+        RememberDropPosition(inst)
         RememberBlueprintDropPlayerFromCombat(inst)
         TryDropRandomBlueprintsOnce(
             inst,
-            inst._techlost_blueprint_drop_player,
+            inst,
             true
         )
     end)
@@ -2843,19 +2874,22 @@ AddPrefabPostInit("prime_mate", function(inst)
     end
 
     inst:ListenForEvent("attacked", function(inst, data)
+        RememberDropPosition(inst)
         RememberBlueprintDropPlayer(inst, data ~= nil and data.attacker or nil)
     end)
 
     inst:ListenForEvent("death", function(inst, data)
+        RememberDropPosition(inst)
         DropPrimeMateSkillTreeNodeBlueprintOnce(inst, data, inst)
     end)
 
     inst:ListenForEvent("onremove", function(inst)
+        RememberDropPosition(inst)
         RememberBlueprintDropPlayerFromCombat(inst)
         DropPrimeMateSkillTreeNodeBlueprintOnce(
             inst,
             nil,
-            inst._techlost_blueprint_drop_player
+            inst
         )
     end)
 end)
