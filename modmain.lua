@@ -2026,9 +2026,50 @@ local function DropItemAtTarget(item, target)
     return true
 end
 
-local function GiveAdvancedBlueprint(container_owner, reward_player)
-    local candidates =
-        GetAdvancedBlueprintRecipes(GetRewardCharacter(reward_player))
+local function GetNearbyRewardPlayer(target, max_range)
+    if target == nil
+        or target.Transform == nil
+        or GLOBAL.AllPlayers == nil then
+        return nil
+    end
+
+    local x, y, z = target.Transform:GetWorldPosition()
+    local range_sq = (max_range or 4) * (max_range or 4)
+    local nearest_player = nil
+    local nearest_distance_sq = nil
+
+    for _, player in ipairs(GLOBAL.AllPlayers) do
+        if GetRewardCharacter(player) ~= nil
+            and player.Transform ~= nil
+            and (player.IsValid == nil or player:IsValid()) then
+            local px, py, pz = player.Transform:GetWorldPosition()
+            local dx = px - x
+            local dy = py - y
+            local dz = pz - z
+            local distance_sq = dx * dx + dy * dy + dz * dz
+            if distance_sq <= range_sq
+                and (nearest_distance_sq == nil
+                    or distance_sq < nearest_distance_sq) then
+                nearest_player = player
+                nearest_distance_sq = distance_sq
+            end
+        end
+    end
+
+    return nearest_player
+end
+
+local function ResolveRewardPlayer(player, reward_source)
+    if GetRewardCharacter(player) ~= nil then
+        return player
+    end
+
+    return GetNearbyRewardPlayer(reward_source, 6)
+end
+
+local function GiveAdvancedBlueprint(container_owner, reward_player, candidates)
+    candidates = candidates
+        or GetAdvancedBlueprintRecipes(GetRewardCharacter(reward_player))
     if #candidates == 0 then
         return false
     end
@@ -2119,18 +2160,25 @@ local function AddSunkenTreasureAdvancedBlueprints(sunken_chest, opener)
         return
     end
 
-    if GetRewardCharacter(opener) == nil then
+    local reward_player = ResolveRewardPlayer(opener, sunken_chest)
+    local reward_character = GetRewardCharacter(reward_player)
+    if reward_character == nil then
         return
     end
 
-    sunken_chest._techlost_advanced_blueprints_checked = true
+    local candidates = GetAdvancedBlueprintRecipes(reward_character)
+    if #candidates == 0 then
+        return
+    end
 
     local count = GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
     for _ = 1, count do
-        if not GiveAdvancedBlueprint(sunken_chest, opener) then
+        if not GiveAdvancedBlueprint(sunken_chest, reward_player, candidates) then
             return
         end
     end
+
+    sunken_chest._techlost_advanced_blueprints_checked = true
 end
 
 local function AddPirateTreasureAdvancedBlueprint(stash, worker)
@@ -2140,16 +2188,23 @@ local function AddPirateTreasureAdvancedBlueprint(stash, worker)
         return
     end
 
-    if GetRewardCharacter(worker) == nil then
+    local reward_player = ResolveRewardPlayer(worker, stash)
+    local reward_character = GetRewardCharacter(reward_player)
+    if reward_character == nil then
         return
     end
 
-    stash._techlost_advanced_blueprints_checked = true
+    local candidates = GetAdvancedBlueprintRecipes(reward_character)
+    if #candidates == 0 then
+        return
+    end
 
     if stash._techlost_has_sunken_treasure
         or math.random() < pirate_treasure_advanced_blueprint_chance then
-        GiveAdvancedBlueprint(stash, worker)
+        GiveAdvancedBlueprint(stash, reward_player, candidates)
     end
+
+    stash._techlost_advanced_blueprints_checked = true
 end
 
 local function RepairInvalidBlueprint(blueprint)
