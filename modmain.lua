@@ -67,6 +67,7 @@ local CHARACTER_RECIPE_TAG_OWNERS = {
 local SUNKEN_TREASURE_HIGH_GEMS = {
     greengem = true,
     yellowgem = true,
+    orangegem = true,
 }
 
 local SUNKEN_TREASURE_SPLUNKER_ITEMS = {
@@ -83,6 +84,14 @@ local SUNKEN_TREASURE_MINER_ITEMS = {
     goldenpickaxe = true,
     moonglass = true,
     moonrocknugget = true,
+}
+
+local SUNKEN_TREASURE_FISHER_BONUS_ITEMS = {
+    boat_ancient_item = true,
+    boat_item = true,
+    anchor_item = true,
+    mast_item = true,
+    steeringwheel_item = true,
 }
 
 local SUNKEN_TREASURE_MARKER_ITEMS = {
@@ -2164,8 +2173,29 @@ local function StoredItemMatches(container_owner, prefabs)
     return matched
 end
 
+local function StoredItemMatchesPredicate(container_owner, predicate)
+    local matched = false
+    ForEachStoredItem(container_owner, function(item)
+        if item ~= nil and predicate(item) then
+            matched = true
+        end
+    end)
+    return matched
+end
+
 local function HasSunkenTreasureMarker(container_owner)
     return StoredItemMatches(container_owner, SUNKEN_TREASURE_MARKER_ITEMS)
+end
+
+local function IsTinFishinBinBlueprint(item)
+    return item ~= nil
+        and item.prefab == "blueprint"
+        and item.recipetouse == "fish_box"
+end
+
+local function HasSunkenTreasureFisherBonus(container_owner)
+    return StoredItemMatches(container_owner, SUNKEN_TREASURE_FISHER_BONUS_ITEMS)
+        or StoredItemMatchesPredicate(container_owner, IsTinFishinBinBlueprint)
 end
 
 local function GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
@@ -2179,6 +2209,8 @@ local function GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
         StoredItemMatches(sunken_chest, SUNKEN_TREASURE_TRAVELER_ITEMS)
     local is_miner =
         StoredItemMatches(sunken_chest, SUNKEN_TREASURE_MINER_ITEMS)
+    local has_fisher_bonus =
+        HasSunkenTreasureFisherBonus(sunken_chest)
     local has_high_gem =
         StoredItemMatches(sunken_chest, SUNKEN_TREASURE_HIGH_GEMS)
 
@@ -2186,7 +2218,16 @@ local function GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
         return has_high_gem and 2 or 1
     elseif is_traveler then
         return 1
-    elseif is_miner and has_high_gem then
+            + (math.random() < sunken_treasure_advanced_blueprint_chance
+                and 1
+                or 0)
+    elseif is_miner then
+        return has_high_gem
+            and 1
+            or (math.random() < sunken_treasure_advanced_blueprint_chance
+                and 1
+                or 0)
+    elseif has_fisher_bonus then
         return 1
     end
 
