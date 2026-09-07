@@ -2026,14 +2026,40 @@ local function DropItemAtTarget(item, target)
     return true
 end
 
-local function GetNearbyRewardPlayer(target, max_range)
-    if target == nil
-        or target.Transform == nil
-        or GLOBAL.AllPlayers == nil then
+local function DropItemAtPosition(item, x, y, z)
+    if item == nil
+        or item.Transform == nil
+        or x == nil
+        or y == nil
+        or z == nil then
+        return false
+    end
+
+    item.Transform:SetPosition(x, y, z)
+    return true
+end
+
+local function GetEntityPosition(target)
+    if target == nil or target.Transform == nil then
+        return nil, nil, nil
+    end
+
+    return target.Transform:GetWorldPosition()
+end
+
+local function GetNearbyRewardPlayer(target, max_range, fallback_x, fallback_y, fallback_z)
+    if GLOBAL.AllPlayers == nil then
         return nil
     end
 
-    local x, y, z = target.Transform:GetWorldPosition()
+    local x, y, z = GetEntityPosition(target)
+    x = x or fallback_x
+    y = y or fallback_y
+    z = z or fallback_z
+    if x == nil or y == nil or z == nil then
+        return nil
+    end
+
     local range_sq = (max_range or 4) * (max_range or 4)
     local nearest_player = nil
     local nearest_distance_sq = nil
@@ -2059,15 +2085,28 @@ local function GetNearbyRewardPlayer(target, max_range)
     return nearest_player
 end
 
-local function ResolveRewardPlayer(player, reward_source)
+local function ResolveRewardPlayer(player, reward_source, fallback_x, fallback_y, fallback_z)
     if GetRewardCharacter(player) ~= nil then
         return player
     end
 
-    return GetNearbyRewardPlayer(reward_source, 6)
+    return GetNearbyRewardPlayer(
+        reward_source,
+        6,
+        fallback_x,
+        fallback_y,
+        fallback_z
+    )
 end
 
-local function GiveAdvancedBlueprint(container_owner, reward_player, candidates)
+local function GiveAdvancedBlueprint(
+    container_owner,
+    reward_player,
+    candidates,
+    fallback_x,
+    fallback_y,
+    fallback_z
+)
     candidates = candidates
         or GetAdvancedBlueprintRecipes(GetRewardCharacter(reward_player))
     if #candidates == 0 then
@@ -2084,7 +2123,8 @@ local function GiveAdvancedBlueprint(container_owner, reward_player, candidates)
     end
 
     if DropItemAtTarget(blueprint, reward_player)
-        or DropItemAtTarget(blueprint, container_owner) then
+        or DropItemAtTarget(blueprint, container_owner)
+        or DropItemAtPosition(blueprint, fallback_x, fallback_y, fallback_z) then
         return true
     end
 
@@ -2153,14 +2193,27 @@ local function GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
     return math.random() < sunken_treasure_advanced_blueprint_chance and 1 or 0
 end
 
-local function AddSunkenTreasureAdvancedBlueprints(sunken_chest, opener)
+local function AddSunkenTreasureAdvancedBlueprints(
+    sunken_chest,
+    opener,
+    fallback_x,
+    fallback_y,
+    fallback_z,
+    count_override
+)
     if sunken_treasure_advanced_blueprint_chance <= 0
         or sunken_chest == nil
         or sunken_chest._techlost_advanced_blueprints_checked then
         return
     end
 
-    local reward_player = ResolveRewardPlayer(opener, sunken_chest)
+    local reward_player = ResolveRewardPlayer(
+        opener,
+        sunken_chest,
+        fallback_x,
+        fallback_y,
+        fallback_z
+    )
     local reward_character = GetRewardCharacter(reward_player)
     if reward_character == nil then
         return
@@ -2171,9 +2224,17 @@ local function AddSunkenTreasureAdvancedBlueprints(sunken_chest, opener)
         return
     end
 
-    local count = GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
+    local count = count_override
+        or GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
     for _ = 1, count do
-        if not GiveAdvancedBlueprint(sunken_chest, reward_player, candidates) then
+        if not GiveAdvancedBlueprint(
+            sunken_chest,
+            reward_player,
+            candidates,
+            fallback_x,
+            fallback_y,
+            fallback_z
+        ) then
             return
         end
     end
@@ -2181,14 +2242,27 @@ local function AddSunkenTreasureAdvancedBlueprints(sunken_chest, opener)
     sunken_chest._techlost_advanced_blueprints_checked = true
 end
 
-local function AddPirateTreasureAdvancedBlueprint(stash, worker)
+local function AddPirateTreasureAdvancedBlueprint(
+    stash,
+    worker,
+    fallback_x,
+    fallback_y,
+    fallback_z,
+    has_sunken_treasure_override
+)
     if pirate_treasure_advanced_blueprint_chance <= 0
         or stash == nil
         or stash._techlost_advanced_blueprints_checked then
         return
     end
 
-    local reward_player = ResolveRewardPlayer(worker, stash)
+    local reward_player = ResolveRewardPlayer(
+        worker,
+        stash,
+        fallback_x,
+        fallback_y,
+        fallback_z
+    )
     local reward_character = GetRewardCharacter(reward_player)
     if reward_character == nil then
         return
@@ -2199,9 +2273,17 @@ local function AddPirateTreasureAdvancedBlueprint(stash, worker)
         return
     end
 
-    if stash._techlost_has_sunken_treasure
+    if has_sunken_treasure_override
+        or stash._techlost_has_sunken_treasure
         or math.random() < pirate_treasure_advanced_blueprint_chance then
-        GiveAdvancedBlueprint(stash, reward_player, candidates)
+        GiveAdvancedBlueprint(
+            stash,
+            reward_player,
+            candidates,
+            fallback_x,
+            fallback_y,
+            fallback_z
+        )
     end
 
     stash._techlost_advanced_blueprints_checked = true
@@ -2421,24 +2503,27 @@ AddPrefabPostInit("sunkenchest", function(inst)
         end
     end
 
-    inst:ListenForEvent("onopen", function(inst, data)
-        local opener = data ~= nil and (data.doer or data.opener or data.player) or nil
-        inst:DoTaskInTime(0, function(inst)
-            AddSunkenTreasureAdvancedBlueprints(inst, opener)
-        end)
-    end)
-
-    if inst.components.container ~= nil then
-        local old_onopenfn = inst.components.container.onopenfn
-        inst.components.container.onopenfn = function(inst, ...)
-            local opener = select(1, ...)
+    if inst.components.workable ~= nil then
+        local old_onfinish = inst.components.workable.onfinish
+        inst.components.workable:SetOnFinishCallback(function(inst, worker, ...)
+            local x, y, z = GetEntityPosition(inst)
+            local count = GetSunkenTreasureAdvancedBlueprintCount(inst)
             local result = nil
-            if old_onopenfn ~= nil then
-                result = old_onopenfn(inst, ...)
+            if old_onfinish ~= nil then
+                result = old_onfinish(inst, worker, ...)
             end
-            AddSunkenTreasureAdvancedBlueprints(inst, opener)
+            GLOBAL.TheWorld:DoTaskInTime(0, function()
+                AddSunkenTreasureAdvancedBlueprints(
+                    inst,
+                    worker,
+                    x,
+                    y,
+                    z,
+                    count
+                )
+            end)
             return result
-        end
+        end)
     end
 end)
 
@@ -2463,10 +2548,25 @@ AddPrefabPostInit("pirate_stash", function(inst)
     if inst.components.workable ~= nil then
         local old_onfinish = inst.components.workable.onfinish
         inst.components.workable:SetOnFinishCallback(function(inst, worker, ...)
-            AddPirateTreasureAdvancedBlueprint(inst, worker)
+            local x, y, z = GetEntityPosition(inst)
+            local has_sunken_treasure =
+                inst._techlost_has_sunken_treasure
+                or HasSunkenTreasureMarker(inst)
+            local result = nil
             if old_onfinish ~= nil then
-                return old_onfinish(inst, worker, ...)
+                result = old_onfinish(inst, worker, ...)
             end
+            GLOBAL.TheWorld:DoTaskInTime(0, function()
+                AddPirateTreasureAdvancedBlueprint(
+                    inst,
+                    worker,
+                    x,
+                    y,
+                    z,
+                    has_sunken_treasure
+                )
+            end)
+            return result
         end)
     end
 end)
