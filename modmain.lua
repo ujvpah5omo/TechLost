@@ -2863,6 +2863,28 @@ local function TryDropRandomBlueprintsOnce(inst, drop_target, require_player)
     TryDropRandomBlueprints(inst, drop_target)
 end
 
+local function IsGoHomeAction(action)
+    return action ~= nil
+        and (action == GLOBAL.ACTIONS.GOHOME
+            or action.id == "GOHOME"
+            or action.str == "GOHOME"
+            or action.name == "GOHOME")
+end
+
+local function IsMonkeyHomeTarget(target)
+    return target ~= nil
+        and (target.prefab == "monkeyhut"
+            or (target.components ~= nil
+                and target.components.childspawner ~= nil))
+end
+
+local function IsPowderMonkeyReturningHome(inst)
+    local buffered_action = inst ~= nil and inst.bufferedaction or nil
+    return buffered_action ~= nil
+        and (IsGoHomeAction(buffered_action.action)
+            or IsMonkeyHomeTarget(buffered_action.target))
+end
+
 AddPrefabPostInit("powder_monkey", function(inst)
     if not GLOBAL.TheWorld.ismastersim
         or not include_powder_monkey_blueprints then
@@ -2880,6 +2902,10 @@ AddPrefabPostInit("powder_monkey", function(inst)
     end)
 
     inst:ListenForEvent("onremove", function(inst)
+        if IsPowderMonkeyReturningHome(inst) then
+            return
+        end
+
         RememberDropPosition(inst)
         RememberBlueprintDropPlayerFromCombat(inst)
         TryDropRandomBlueprintsOnce(
