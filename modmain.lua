@@ -482,6 +482,11 @@ local function IsShadowSkillTreeRecipe(recipe)
 end
 
 local function IsSkillTreeRecipeAvailableForBlueprintPool(recipe)
+    if skill_tree_node_blueprint_mode == "after_both_rifts"
+        and not IsSkillTreeNodeBlueprintActivationProgressAllowed() then
+        return false
+    end
+
     if IsLunarSkillTreeRecipe(recipe) then
         return IsLunarRiftEnabled()
     elseif IsShadowSkillTreeRecipe(recipe) then
