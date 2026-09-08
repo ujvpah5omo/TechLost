@@ -94,6 +94,10 @@ local SUNKEN_TREASURE_FISHER_BONUS_ITEMS = {
     steeringwheel_item = true,
 }
 
+local SUNKEN_TREASURE_GUARANTEE_ITEMS = {
+    ancienttree_seed = true,
+}
+
 local SUNKEN_TREASURE_MARKER_ITEMS = {
     boatpatch = true,
     cookiecuttershell = true,
@@ -110,6 +114,7 @@ local SUNKEN_TREASURE_MARKER_ITEMS = {
     armorruins = true,
     multitool_axe_pickaxe = true,
     thulecite = true,
+    ancienttree_seed = true,
 }
 
 -- Keep a non-zero floor so every restricted recipe remains obtainable even
@@ -2225,25 +2230,37 @@ local function GetSunkenTreasureAdvancedBlueprintCount(sunken_chest)
         HasSunkenTreasureFisherBonus(sunken_chest)
     local has_high_gem =
         StoredItemMatches(sunken_chest, SUNKEN_TREASURE_HIGH_GEMS)
+    local has_guarantee_item =
+        StoredItemMatches(sunken_chest, SUNKEN_TREASURE_GUARANTEE_ITEMS)
+
+    local count = 0
 
     if is_splunker then
-        return has_high_gem and 2 or 1
+        count = has_high_gem and 2 or 1
     elseif is_traveler then
-        return 1
+        count = 1
             + (math.random() < sunken_treasure_advanced_blueprint_chance
                 and 1
                 or 0)
     elseif is_miner then
-        return has_high_gem
+        count = has_high_gem
             and 1
             or (math.random() < sunken_treasure_advanced_blueprint_chance
                 and 1
                 or 0)
     elseif has_fisher_bonus then
+        count = 1
+    else
+        count = math.random() < sunken_treasure_advanced_blueprint_chance
+            and 1
+            or 0
+    end
+
+    if has_guarantee_item and count < 1 then
         return 1
     end
 
-    return math.random() < sunken_treasure_advanced_blueprint_chance and 1 or 0
+    return count
 end
 
 local function AddSunkenTreasureAdvancedBlueprints(
