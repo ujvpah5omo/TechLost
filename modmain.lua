@@ -2863,6 +2863,21 @@ local function TryDropRandomBlueprintsOnce(inst, drop_target, require_player)
     TryDropRandomBlueprints(inst, drop_target)
 end
 
+local function QueueTryDropRandomBlueprintsOnce(inst, drop_target, require_player)
+    if inst == nil
+        or inst._techlost_random_blueprint_drop_checked
+        or inst._techlost_random_blueprint_drop_queued then
+        return
+    end
+
+    inst._techlost_random_blueprint_drop_queued = true
+    RememberDropPosition(inst)
+    GLOBAL.TheWorld:DoTaskInTime(0, function()
+        inst._techlost_random_blueprint_drop_queued = nil
+        TryDropRandomBlueprintsOnce(inst, drop_target or inst, require_player)
+    end)
+end
+
 local function IsGoHomeAction(action)
     return action ~= nil
         and (action == GLOBAL.ACTIONS.GOHOME
@@ -2911,7 +2926,7 @@ local function HookPowderMonkeyLootDropper(inst)
         if old_droploot ~= nil then
             result = old_droploot(self, ...)
         end
-        TryDropRandomBlueprintsOnce(inst, inst, false)
+        QueueTryDropRandomBlueprintsOnce(inst, inst, false)
         return result
     end
 end
@@ -2933,6 +2948,7 @@ AddPrefabPostInit("powder_monkey", function(inst)
     inst:ListenForEvent("death", function(inst)
         inst._techlost_blueprint_drop_dead = true
         RememberDropPosition(inst)
+        QueueTryDropRandomBlueprintsOnce(inst, inst, false)
     end)
 
     inst:ListenForEvent("onremove", function(inst)
