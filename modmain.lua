@@ -2893,11 +2893,37 @@ local function IsDeadEntity(inst)
         and inst.components.health:IsDead()
 end
 
+local function HookPowderMonkeyLootDropper(inst)
+    local lootdropper = inst ~= nil
+        and inst.components ~= nil
+        and inst.components.lootdropper
+        or nil
+    if lootdropper == nil or lootdropper._techlost_blueprint_hooked then
+        return
+    end
+
+    lootdropper._techlost_blueprint_hooked = true
+
+    local old_droploot = lootdropper.DropLoot
+    lootdropper.DropLoot = function(self, ...)
+        RememberDropPosition(inst)
+        local result = nil
+        if old_droploot ~= nil then
+            result = old_droploot(self, ...)
+        end
+        TryDropRandomBlueprintsOnce(inst, inst, false)
+        return result
+    end
+end
+
 AddPrefabPostInit("powder_monkey", function(inst)
     if not GLOBAL.TheWorld.ismastersim
         or not include_powder_monkey_blueprints then
         return
     end
+
+    HookPowderMonkeyLootDropper(inst)
+    inst:DoTaskInTime(0, HookPowderMonkeyLootDropper)
 
     inst:ListenForEvent("attacked", function(inst, data)
         RememberDropPosition(inst)
@@ -2907,7 +2933,6 @@ AddPrefabPostInit("powder_monkey", function(inst)
     inst:ListenForEvent("death", function(inst)
         inst._techlost_blueprint_drop_dead = true
         RememberDropPosition(inst)
-        TryDropRandomBlueprintsOnce(inst, inst, false)
     end)
 
     inst:ListenForEvent("onremove", function(inst)
