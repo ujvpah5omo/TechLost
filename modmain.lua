@@ -2885,6 +2885,14 @@ local function IsPowderMonkeyReturningHome(inst)
             or IsMonkeyHomeTarget(buffered_action.target))
 end
 
+local function IsDeadEntity(inst)
+    return inst ~= nil
+        and inst.components ~= nil
+        and inst.components.health ~= nil
+        and inst.components.health.IsDead ~= nil
+        and inst.components.health:IsDead()
+end
+
 AddPrefabPostInit("powder_monkey", function(inst)
     if not GLOBAL.TheWorld.ismastersim
         or not include_powder_monkey_blueprints then
@@ -2897,12 +2905,15 @@ AddPrefabPostInit("powder_monkey", function(inst)
     end)
 
     inst:ListenForEvent("death", function(inst)
+        inst._techlost_blueprint_drop_dead = true
         RememberDropPosition(inst)
         TryDropRandomBlueprintsOnce(inst, inst, false)
     end)
 
     inst:ListenForEvent("onremove", function(inst)
-        if IsPowderMonkeyReturningHome(inst) then
+        if IsPowderMonkeyReturningHome(inst)
+            and not inst._techlost_blueprint_drop_dead
+            and not IsDeadEntity(inst) then
             return
         end
 

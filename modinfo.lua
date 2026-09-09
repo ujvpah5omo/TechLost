@@ -2,10 +2,10 @@ name = "全科技蓝图解锁"
 description = [[
 符合条件的普通科技配方初始只能通过蓝图解锁。原生稀有蓝图保留 Boss、任务及商店等专属获取途径。
 
-角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的普通配方可从风滚草和海盗猴获得蓝图。角色相关蓝图不进入普通蓝图池，沉底宝箱会按开启者角色筛选角色相关奖励，海盗宝藏会按挖开者角色筛选角色相关奖励。技能树可配置为需要技能许可点才能点亮节点，也可直接禁用全部技能树。技能许可点蓝图不进入普通蓝图池，只由海盗猴首领大副按击杀者角色掉落，且不会回退为其他角色许可。月后影后模式下，可提前获得许可点，但双裂隙开启前不能点亮技能；技能树制作配方蓝图也需双裂隙开启后才会出现，节点自身月亮/暗影裂隙条件仍保留。未使用许可点在换角色时会重置，点亮技能消耗的许可点不会返还。本 Mod 蓝图池生成的地面蓝图可配置为经过数次下雨后消失。
+角色死亡可配置为丢失全部已学科技。每台科技站独立保存公开配方；由本 Mod 新锁定的普通配方可从风滚草和海盗猴获得蓝图。角色相关蓝图不进入普通蓝图池，沉底宝箱会按开启者角色筛选角色相关奖励，海盗宝藏会按挖开者角色筛选角色相关奖励。技能树可配置为需要技能许可点才能点亮节点，也可直接禁用全部技能树。技能许可点蓝图不进入普通蓝图池，只由海盗猴首领大副按击杀者角色掉落，且不会回退为其他角色许可。月后影后模式下，可提前获得许可点，但双裂隙开启前不能点亮技能；技能树制作配方蓝图也需双裂隙开启后才会出现，节点自身月亮/暗影裂隙条件仍保留。未使用许可点在换角色时会重置，点亮技能消耗的许可点不会返还。本 Mod 蓝图池生成的地面蓝图可配置为经过数次下雨后消失。经实测，风滚草、沉底宝箱和海盗宝藏三个蓝图概率配置推荐设置为 50%。
 ]]
 author = "Codex"
-version = "2.10.23"
+version = "2.10.24"
 
 api_version = 10
 dst_compatible = true
@@ -127,12 +127,12 @@ configuration_options =
         {
             { description = "关闭", data = 0 },
             { description = "保守 10%", data = 0.10 },
-            { description = "推荐 20%", data = 0.20 },
+            { description = "20%", data = 0.20 },
             { description = "慷慨 30%", data = 0.30 },
-            { description = "大量 50%", data = 0.50 },
+            { description = "推荐 50%", data = 0.50 },
             { description = "极高 75%", data = 0.75 },
         },
-        default = 0,
+        default = 0.50,
     },
     {
         name = "pirate_treasure_advanced_blueprints",
@@ -142,12 +142,12 @@ configuration_options =
         {
             { description = "关闭", data = 0 },
             { description = "保守 10%", data = 0.10 },
-            { description = "推荐 20%", data = 0.20 },
+            { description = "20%", data = 0.20 },
             { description = "慷慨 30%", data = 0.30 },
-            { description = "大量 50%", data = 0.50 },
+            { description = "推荐 50%", data = 0.50 },
             { description = "极高 75%", data = 0.75 },
         },
-        default = 0,
+        default = 0.50,
     },
     {
         name = "lose_tech_on_death",
@@ -196,10 +196,10 @@ configuration_options =
             { description = "5%", data = 0.05 },
             { description = "10%", data = 0.10 },
             { description = "20%", data = 0.20 },
-            { description = "50%", data = 0.50 },
+            { description = "推荐 50%", data = 0.50 },
             { description = "75%", data = 0.75 },
             { description = "必出", data = 1 },
         },
-        default = 0.05,
+        default = 0.50,
     },
 }
