@@ -482,6 +482,10 @@ local function IsShadowSkillTreeRecipe(recipe)
 end
 
 local function IsSkillTreeRecipeAvailableForBlueprintPool(recipe)
+    if recipe == nil or recipe.builder_skill == nil then
+        return true
+    end
+
     if skill_tree_node_blueprint_mode == "after_both_rifts"
         and not IsSkillTreeNodeBlueprintActivationProgressAllowed() then
         return false
@@ -2948,7 +2952,7 @@ AddPrefabPostInit("powder_monkey", function(inst)
     inst:ListenForEvent("death", function(inst)
         inst._techlost_blueprint_drop_dead = true
         RememberDropPosition(inst)
-        QueueTryDropRandomBlueprintsOnce(inst, inst, false)
+        TryDropRandomBlueprintsOnce(inst, inst, false)
     end)
 
     inst:ListenForEvent("onremove", function(inst)
