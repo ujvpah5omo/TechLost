@@ -129,8 +129,8 @@ local BLUEPRINT_TIER_INTERMEDIATE = "intermediate"
 local BLUEPRINT_TIER_ADVANCED = "advanced"
 
 local TUMBLEWEED_BLUEPRINT_TIER_WEIGHTS = {
-    { tier = BLUEPRINT_TIER_BASIC, weight = 0.42 },
-    { tier = BLUEPRINT_TIER_INTERMEDIATE, weight = 0.48 },
+    { tier = BLUEPRINT_TIER_BASIC, weight = 0.35 },
+    { tier = BLUEPRINT_TIER_INTERMEDIATE, weight = 0.55 },
     { tier = BLUEPRINT_TIER_ADVANCED, weight = 0.10 },
 }
 
