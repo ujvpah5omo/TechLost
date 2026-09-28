@@ -38,7 +38,7 @@ Advanced blueprints come from Sunken Chests and Pirate Treasure. The pool is pub
 Configurable rules include Ancient tech, Brightsmithy tech, Shadowcraft Plinth tech, character-specific tech, skill-tree crafting recipes, skill permits, losing learned tech on death, and rain-washing ground blueprints.
 ]])
 author = "Codex"
-version = "2.10.29"
+version = "2.10.30"
 forumthread = "https://steamcommunity.com/sharedfiles/filedetails/?id=3748878775"
 
 api_version = 10
@@ -53,6 +53,8 @@ client_only_mod = false
 server_only_mod = false
 priority = 0
 server_filter_tags = { "blueprint", "tech", "progression" }
+icon_atlas = "modicon.xml"
+icon = "modicon.tex"
 
 local OFF = T("关闭", "Off")
 local ON = T("开启", "On")
